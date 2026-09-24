@@ -517,22 +517,47 @@ export default function Feed({ dbName }: { dbName: string }) {
               })
               .run()
           } else {
-            // New entries land right after the leading composer (position 0
-            // is reserved for it — see ensureLeadingComposer) — only
-            // auto-scroll if the user was already up there to see it.
-            const wasNearTop = isNearTop(scrollRef.current)
+            // Placed by _id, the same key the initial load and pagination
+            // sort on (descending) — NOT always at the top. Most new entries
+            // do have the newest id, but an AI summary of a past day is
+            // minted just above that day's newest entry (createSummaryEntry),
+            // so pinning it under the composer showed it above every newer
+            // entry until a reload re-sorted it.
             const composerSize = editor.state.doc.firstChild?.nodeSize ?? 0
+            // `as` keeps TS from narrowing to null (it can't see the
+            // callback's reassignment — same issue SummaryGrouping.ts notes).
+            let insertAt = null as number | null
+            editor.state.doc.forEach((node: any, pos: number) => {
+              if (insertAt !== null || pos < composerSize) return
+              if (node.attrs.entryId && node.attrs.entryId < rid) insertAt = pos
+            })
+            if (insertAt === null) {
+              // Older than everything loaded. If older pages remain,
+              // pagination will bring it in — inserting now would duplicate
+              // it then, and leaving it in existsInDbRef without a block
+              // would make flushBlocks delete it as "removed".
+              if (hasMoreRef.current) {
+                existsInDbRef.current.delete(rid)
+                lastSavedRef.current.delete(rid)
+                lastAuthorRef.current.delete(rid)
+                return
+              }
+              insertAt = editor.state.doc.content.size
+            }
+            // Only auto-scroll if it landed at the top and the user was
+            // already up there to see it.
+            const shouldScroll = insertAt === composerSize && isNearTop(scrollRef.current)
             // Same addToHistory fix — a brand-new entry arriving from
             // another tab/user shouldn't be undoable from here either.
             editor
               .chain()
-              .insertContentAt(composerSize, entryToBlockHtml(doc, rid), { updateSelection: false })
+              .insertContentAt(insertAt, entryToBlockHtml(doc, rid), { updateSelection: false })
               .command(({ tr }: any) => {
                 tr.setMeta('addToHistory', false)
                 return true
               })
               .run()
-            if (wasNearTop) scrollToTop()
+            if (shouldScroll) scrollToTop()
           }
 
           // Overwrites the raw-content baseline set above (line ~485) with
