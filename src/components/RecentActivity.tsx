@@ -2,10 +2,7 @@ import { useEffect, useState } from 'react'
 import { useStore } from '@nanostores/react'
 import { AtSign } from 'lucide-react'
 import { $drains } from '@/helpers/drains'
-import { $identity } from '@/services/identity'
-import { getDrainDb } from '@/services/db'
-import { loadLatestPage } from '@/utils/ulid-pages'
-import { stripHtml } from '@/utils/stripHtml'
+import { fetchActivity, type ActivityItem } from '@/services/drainsApi'
 
 function relativeTime(ts: number) {
   const diff = Date.now() - ts
@@ -17,68 +14,47 @@ function relativeTime(ts: number) {
   return `${Math.floor(hr / 24)}d ago`
 }
 
-interface ActivityItem {
-  dbName: string
-  drainTitle: string
-  entryId: string
-  snippet: string
-  timestamp: number
-  mentionsMe: boolean
-}
-
-const PER_DRAIN_LIMIT = 8
-const SHOWN = 6
-
 // Unified feed instead of separate "mentions" / "recent updates" sections —
 // a mention badge on an item covers the mentions case without needing a
-// second list or a tabbed UI. Only reflects what's already synced locally
-// per drain (same local-first tradeoff as CommandPalette's search).
+// second list or a tabbed UI. Fetched from the server (api/activity.ts) so it
+// covers every drain, not just the ones this browser has synced lately.
+// Refetched on mount (the sidebar remounts per navigation), whenever the
+// drain list changes, and when the tab regains focus; the minute tick only
+// keeps the "3m ago" labels honest between fetches.
 export function RecentActivity() {
   const drains = useStore($drains)
-  const identity = useStore($identity)
   const [items, setItems] = useState<ActivityItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const [, setTick] = useState(0)
 
   useEffect(() => {
     if (drains.length === 0) {
       setItems([])
-      setLoading(false)
       return
     }
     let cancelled = false
-    const myEmail = identity?.email?.toLowerCase()
-
-    Promise.all(
-      drains.map(async (drain: any) => {
-        const db = getDrainDb(drain.dbName)
-        const page = await loadLatestPage(db, PER_DRAIN_LIMIT).catch(() => [] as any[])
-        return page.map(
-          (doc: any): ActivityItem => ({
-            dbName: drain.dbName,
-            drainTitle: drain.title || 'Untitled',
-            entryId: doc._id.slice('entry:'.length),
-            snippet: stripHtml(doc.content).slice(0, 100),
-            timestamp: doc.updatedAt || doc.createdAt,
-            mentionsMe: !!myEmail && doc.content.toLowerCase().includes(`data-id="${myEmail}"`),
-          })
-        )
-      })
-    ).then((groups) => {
-      if (cancelled) return
-      const merged = groups
-        .flat()
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, SHOWN)
-      setItems(merged)
-      setLoading(false)
-    })
-
+    const load = () => {
+      // A failed refresh keeps showing the last good list rather than
+      // blanking it.
+      fetchActivity()
+        .then((next) => {
+          if (!cancelled) setItems(next)
+        })
+        .catch(() => {})
+    }
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    load()
+    document.addEventListener('visibilitychange', onVisible)
+    const tick = setInterval(() => setTick((t) => t + 1), 60_000)
     return () => {
       cancelled = true
+      document.removeEventListener('visibilitychange', onVisible)
+      clearInterval(tick)
     }
-  }, [drains, identity?.email])
+  }, [drains])
 
-  if (loading || items.length === 0) return null
+  if (items.length === 0) return null
 
   return (
     <div className="shrink-0 border-t px-4 py-3">
@@ -92,13 +68,16 @@ export function RecentActivity() {
             href={`/drains/${item.dbName}#entry-${item.entryId}`}
             className="flex items-start gap-1.5 rounded-md px-1.5 py-1 text-xs outline-none transition-colors hover:bg-secondary focus-visible:ring-2 focus-visible:ring-ring"
           >
-            {item.mentionsMe && <AtSign className="mt-0.5 size-3 shrink-0 text-violet-500" />}
+            {item.mentionsMe && <AtSign className="mt-0.5 size-3 shrink-0 text-violet-500" aria-label="Mentions you" />}
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline justify-between gap-2">
                 <span className="truncate font-medium text-neutral-600">{item.drainTitle}</span>
                 <span className="shrink-0 text-[10px] text-neutral-400">{relativeTime(item.timestamp)}</span>
               </div>
-              <p className="line-clamp-1 text-muted-foreground">{item.snippet}</p>
+              <p className="line-clamp-1 text-muted-foreground">
+                <span className="text-neutral-500">{item.byMe ? 'You' : item.authorName || 'Someone'}: </span>
+                {item.snippet}
+              </p>
             </div>
           </a>
         ))}

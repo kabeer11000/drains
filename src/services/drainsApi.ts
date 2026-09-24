@@ -124,3 +124,20 @@ export async function regenerateIngestionToken(dbName: string): Promise<{ token:
   })
   return parseErrorOr(res, 'Failed to regenerate ingestion token')
 }
+
+export interface ActivityItem {
+  dbName: string
+  drainTitle: string
+  entryId: string
+  snippet: string
+  timestamp: number
+  authorName: string
+  byMe: boolean
+  mentionsMe: boolean
+}
+
+export async function fetchActivity(): Promise<ActivityItem[]> {
+  const res = await fetch('/api/activity', { headers: { Authorization: authHeader() } })
+  const data = await parseErrorOr<{ items: ActivityItem[] }>(res, 'Failed to load activity')
+  return data.items
+}

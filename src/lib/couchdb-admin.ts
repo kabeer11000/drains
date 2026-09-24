@@ -546,6 +546,20 @@ export async function getEntriesByIds(dbName: string, ids: string[]) {
   return data.rows.map((r: any) => r.doc).filter(Boolean)
 }
 
+// Most recently modified entries first. The changes feed lists each doc once,
+// at its latest revision, so this is "last touched" order — unlike _all_docs,
+// which is creation (_id) order. Deleted entries drop out on their own: their
+// tombstones carry no `type` field for the selector to match.
+export async function getRecentEntryChanges(dbName: string, limit: number) {
+  const res = await adminFetch(`/${dbName}/_changes?filter=_selector&descending=true&include_docs=true&limit=${limit}`, {
+    method: 'POST',
+    body: JSON.stringify({ selector: { type: 'entry' } }),
+  })
+  if (!res.ok) throw new Error(`Failed to read changes for ${dbName} (${res.status})`)
+  const data = await res.json()
+  return data.results.map((r: any) => r.doc).filter(Boolean)
+}
+
 export async function getPublicEntries(dbName: string) {
   const qs = new URLSearchParams({
     startkey: JSON.stringify('entry:'),
