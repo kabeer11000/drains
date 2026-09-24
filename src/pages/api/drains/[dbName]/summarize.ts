@@ -39,7 +39,11 @@ export const POST: APIRoute = async ({ request, params }) => {
   // Only entries actually found (not every id requested — some may not
   // exist), so the summary's claimed set matches what it really covers.
   const foundEntryIds = entries.map((e: any) => e._id.slice('entry:'.length))
-  const newestSummarizedId = foundEntryIds[foundEntryIds.length - 1]
+  // Largest id, not newest createdAt — the feed sorts by id, and the two
+  // disagree for split entries (AssignBlockId gives the split-off half an
+  // old id but a fresh createdAt). Anchoring on createdAt could slot the
+  // summary below some of the very entries it claims.
+  const newestSummarizedId = foundEntryIds.reduce((max: string, id: string) => (id > max ? id : max))
   const transcript = entries
     .map((e: any) => `- ${stripHtmlTags(e.content)}`)
     .join('\n')
