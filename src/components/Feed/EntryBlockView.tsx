@@ -50,6 +50,10 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
     <NodeViewWrapper
       as="p"
       data-entry-id={entryId}
+      // Lets a `#entry-<id>` link to the page already open (Recent Activity,
+      // search) scroll here natively: Astro's router hands same-page hash
+      // links to the browser, which only matches element ids.
+      id={entryId ? `entry-${entryId}` : undefined}
       className={`group relative ${isComposer ? 'border border-dashed border-border' : ''}`}
       style={{
         // The placeholder below is position: absolute (so it never
