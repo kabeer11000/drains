@@ -37,13 +37,21 @@ function DialogOverlay({
   )
 }
 
+// Below sm, a full-screen sheet that reads as its own page (bigger
+// dialogs: search, drain settings, tokens...). Small confirm dialogs keep
+// the centred card everywhere.
+const MOBILE_FULL_SCREEN =
+  "max-sm:top-0 max-sm:left-0 max-sm:h-dvh max-sm:max-h-none max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:content-start max-sm:overflow-y-auto max-sm:rounded-none max-sm:p-5 max-sm:pt-[max(1.25rem,env(safe-area-inset-top))] max-sm:ring-0 max-sm:flex max-sm:flex-col max-sm:[&>[data-slot=dialog-footer]]:sticky max-sm:[&>[data-slot=dialog-footer]]:bottom-0 max-sm:[&>[data-slot=dialog-footer]]:-mx-5 max-sm:[&>[data-slot=dialog-footer]]:mt-auto max-sm:[&>[data-slot=dialog-footer]]:-mb-5 max-sm:[&>[data-slot=dialog-footer]]:rounded-none max-sm:[&>[data-slot=dialog-footer]]:bg-popover max-sm:[&>[data-slot=dialog-footer]]:pb-[max(1rem,env(safe-area-inset-bottom))] max-sm:data-open:zoom-in-100 max-sm:data-open:slide-in-from-bottom-4 max-sm:data-closed:zoom-out-100"
+
 function DialogContent({
   className,
   children,
   showCloseButton = true,
+  mobileFullScreen = false,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  mobileFullScreen?: boolean
 }) {
   return (
     <DialogPortal>
@@ -52,7 +60,8 @@ function DialogContent({
         data-slot="dialog-content"
         className={cn(
           "fixed top-1/2 left-1/2 z-50 grid w-full max-w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 gap-4 rounded-xl bg-popover p-4 text-sm text-popover-foreground ring-1 ring-foreground/10 duration-100 outline-none sm:max-w-sm data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
-          className
+          className,
+          mobileFullScreen && MOBILE_FULL_SCREEN
         )}
         {...props}
       >
@@ -63,7 +72,7 @@ function DialogContent({
             render={
               <Button
                 variant="ghost"
-                className="absolute top-2 right-2"
+                className={cn("absolute top-2 right-2", mobileFullScreen && "max-sm:top-[max(0.75rem,env(safe-area-inset-top))] max-sm:right-3 max-sm:size-9")}
                 size="icon-sm"
               />
             }

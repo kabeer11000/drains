@@ -37,12 +37,14 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  mobileFullScreen = false,
   ...props
 }: Omit<React.ComponentProps<typeof Dialog>, "children"> & {
   title?: string
   description?: string
   className?: string
   showCloseButton?: boolean
+  mobileFullScreen?: boolean
   children: React.ReactNode
 }) {
   return (
@@ -54,9 +56,14 @@ function CommandDialog({
       <DialogContent
         className={cn(
           "top-1/3 translate-y-0 overflow-hidden rounded-xl! p-0",
+          // Full screen keeps the palette edge to edge: no padding, square
+          // corners, and the list scrolls inside instead of the sheet.
+          mobileFullScreen &&
+            "max-sm:overflow-hidden! max-sm:rounded-none! max-sm:p-0! max-sm:pt-[env(safe-area-inset-top)]!",
           className
         )}
         showCloseButton={showCloseButton}
+        mobileFullScreen={mobileFullScreen}
       >
         {children}
       </DialogContent>

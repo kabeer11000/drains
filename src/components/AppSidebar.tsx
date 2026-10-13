@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useStore } from '@nanostores/react'
 import { atom } from 'nanostores'
-import { Globe, Lock, MoreHorizontal, Pencil, Trash2, Link, Inbox, Download, Search, X, ChevronLeft, ChevronRight } from 'lucide-react'
-import { $commandPaletteOpen } from './CommandPalette'
+import { Globe, Lock, MoreHorizontal, Pencil, Trash2, Link, Inbox, Download, X, ChevronLeft, ChevronRight } from 'lucide-react'
 import { RecentActivity } from './RecentActivity'
 import { ApiTokensDialog } from './ApiTokensDialog'
 import { TrashDialog } from './TrashDialog'
@@ -304,14 +303,6 @@ export default function AppSidebar() {
             drains.dev
           </a>
           <div className="ml-auto flex items-center gap-2">
-            <button
-              type="button"
-              title="Search (Ctrl/Cmd+K)"
-              onClick={() => $commandPaletteOpen.set(true)}
-              className={`flex size-8 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-secondary hover:text-foreground ${FOCUS_RING}`}
-            >
-              <Search className="size-4" />
-            </button>
             <UserMenu onOpenTokens={() => setTokensOpen(true)} onOpenTrash={() => setTrashOpen(true)} />
             <NewDrainDialog />
           </div>

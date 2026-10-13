@@ -57,15 +57,17 @@ export default function RenameDrainDialog({
   const [inviteEmail, setInviteEmail] = useState('')
   const [inviteError, setInviteError] = useState('')
   const [inviting, setInviting] = useState(false)
+  const [confirmPrivate, setConfirmPrivate] = useState(false)
+  const [makingPrivate, setMakingPrivate] = useState(false)
 
   const [publicToken, setPublicToken] = useState<string | null>(null)
   const [publishBusy, setPublishBusy] = useState(false)
   const [publishError, setPublishError] = useState('')
 
   useEffect(() => {
-    if (!open || visibility !== 'shared') return
+    if (!open) return
     listDrainMembers(drainId).then(setMembers).catch(() => setMembers([]))
-  }, [open, drainId, visibility])
+  }, [open, drainId])
 
   useEffect(() => {
     if (!open || !isOwner) return
@@ -174,6 +176,9 @@ export default function RenameDrainDialog({
       await inviteToDrain(drainId, email)
       setMembers((prev) => [...prev, email])
       setInviteEmail('')
+      // The drain may have just gone from private to shared — refresh the
+      // sidebar's lock/globe icons.
+      populateDrains()
     } catch (err: any) {
       setInviteError(err?.message ?? 'Failed to invite')
     } finally {
@@ -181,10 +186,30 @@ export default function RenameDrainDialog({
     }
   }
 
+  // Removes everyone but the owner in one go; the server flips the drain
+  // back to private when the last of them is gone (syncDrainVisibility).
+  const handleMakePrivate = async () => {
+    const me = $identity.get()?.email
+    const others = members.filter((m) => m !== me)
+    setMakingPrivate(true)
+    try {
+      for (const email of others) await removeDrainMemberApi(drainId, email)
+      setMembers((prev) => prev.filter((m) => m === me))
+      populateDrains()
+    } catch (err: any) {
+      setInviteError(err?.message ?? 'Failed to remove everyone')
+      listDrainMembers(drainId).then(setMembers).catch(() => {})
+    } finally {
+      setMakingPrivate(false)
+      setConfirmPrivate(false)
+    }
+  }
+
   const handleRemove = async (email: string) => {
     setMembers((prev) => prev.filter((m) => m !== email))
     try {
       await removeDrainMemberApi(drainId, email)
+      populateDrains()
     } catch {
       // Refresh from server if the optimistic removal turned out to be wrong
       listDrainMembers(drainId).then(setMembers).catch(() => {})
@@ -193,13 +218,13 @@ export default function RenameDrainDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="sm:max-w-3xl">
+      <DialogContent mobileFullScreen className="sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>Edit drain</DialogTitle>
           <DialogDescription>Update the details for this drain.</DialogDescription>
         </DialogHeader>
 
-        <div className="grid max-h-[65vh] gap-6 overflow-y-auto pr-1 sm:grid-cols-2">
+        <div className="grid max-h-[65vh] gap-6 overflow-y-auto pr-1 max-sm:max-h-none max-sm:overflow-visible max-sm:pr-0 sm:grid-cols-2">
           {/* Left column: core details */}
           <div className="grid gap-4">
             <div className="grid gap-2">
@@ -262,9 +287,14 @@ export default function RenameDrainDialog({
             </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
 
-            {visibility === 'shared' && (
+            {(isOwner || members.length > 1) && (
               <div className="grid gap-2 border-t pt-3">
-                <Label>People with access</Label>
+                <Label>Sharing</Label>
+                <p className="text-xs text-muted-foreground">
+                  {members.length > 1
+                    ? 'Everyone here can read and write this drain.'
+                    : 'Only you can see this drain. Invite someone to make it shared.'}
+                </p>
                 <div className="flex flex-col gap-1.5">
                   {members.map((email) => (
                     <div key={email} className="flex items-center justify-between rounded-md bg-muted/50 px-2.5 py-1.5 text-sm">
@@ -296,6 +326,31 @@ export default function RenameDrainDialog({
                   </div>
                 )}
                 {inviteError && <p className="text-xs text-destructive">{inviteError}</p>}
+                {isOwner && members.length > 1 && (
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-dashed px-2.5 py-2 text-xs">
+                    <span className="text-muted-foreground">
+                      {confirmPrivate
+                        ? `Remove ${members.length - 1} ${members.length === 2 ? 'person' : 'people'}? They lose access right away.`
+                        : 'Make this drain just yours again.'}
+                    </span>
+                    <div className="flex shrink-0 gap-1.5">
+                      {confirmPrivate && (
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmPrivate(false)}>
+                          Cancel
+                        </Button>
+                      )}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant={confirmPrivate ? 'destructive' : 'outline'}
+                        disabled={makingPrivate}
+                        onClick={() => (confirmPrivate ? handleMakePrivate() : setConfirmPrivate(true))}
+                      >
+                        {makingPrivate ? 'Removing…' : confirmPrivate ? 'Remove everyone' : 'Make private'}
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

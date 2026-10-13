@@ -16,15 +16,12 @@ import { startDrainSync } from '@/services/sync'
 import { createDrain } from '@/services/drainsApi'
 import { populateDrains } from '@/helpers/drains'
 
-type Visibility = 'shared' | 'private'
-
 export default function NewDrainDialog() {
   const [open, setOpen] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [tagInput, setTagInput] = useState('')
   const [tags, setTags] = useState<string[]>([])
-  const [visibility, setVisibility] = useState<Visibility>('private')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState('')
 
@@ -33,7 +30,6 @@ export default function NewDrainDialog() {
     setDescription('')
     setTagInput('')
     setTags([])
-    setVisibility('private')
     setError('')
   }
 
@@ -50,7 +46,7 @@ export default function NewDrainDialog() {
     setError('')
     try {
       const finalTitle = title.trim() || 'Untitled'
-      const { dbName } = await createDrain(finalTitle, visibility, description.trim() || undefined, tags)
+      const { dbName } = await createDrain(finalTitle, 'private', description.trim() || undefined, tags)
 
       // Warm the local PouchDB for this drain and start syncing it right
       // away so it's ready the instant the user navigates into it.
@@ -76,7 +72,7 @@ export default function NewDrainDialog() {
       }}
     >
       <DialogTrigger render={<Button size="sm" className="rounded-full" />}>New drain</DialogTrigger>
-      <DialogContent>
+      <DialogContent mobileFullScreen>
         <DialogHeader>
           <DialogTitle>New drain</DialogTitle>
           <DialogDescription>Create a new drain for your changelog entries.</DialogDescription>
@@ -135,27 +131,9 @@ export default function NewDrainDialog() {
             />
           </div>
         </div>
-        <div className="grid gap-2">
-          <Label>Visibility</Label>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setVisibility('private')}
-              className={`flex-1 rounded-md border p-3 text-left text-sm ${visibility === 'private' ? 'border-primary bg-accent' : ''}`}
-            >
-              <div className="font-semibold">Private</div>
-              <div className="text-xs text-muted-foreground">Only you can read or write it</div>
-            </button>
-            <button
-              type="button"
-              onClick={() => setVisibility('shared')}
-              className={`flex-1 rounded-md border p-3 text-left text-sm ${visibility === 'shared' ? 'border-primary bg-accent' : ''}`}
-            >
-              <div className="font-semibold">Shared</div>
-              <div className="text-xs text-muted-foreground">Invite specific people to collaborate</div>
-            </button>
-          </div>
-        </div>
+        <p className="text-xs text-muted-foreground">
+          Only you can see a new drain. Invite people, or publish a read-only link, any time from its settings.
+        </p>
         {error && <p className="text-xs text-destructive">{error}</p>}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>

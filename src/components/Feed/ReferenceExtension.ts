@@ -1,4 +1,5 @@
 import { Node, mergeAttributes } from '@tiptap/core'
+import { PluginKey } from '@tiptap/pm/state'
 import { Suggestion } from '@tiptap/suggestion'
 import { ReactNodeViewRenderer } from '@tiptap/react'
 import { $drains } from '@/helpers/drains'
@@ -228,9 +229,19 @@ export const ReferenceExtension = Node.create({
   addProseMirrorPlugins() {
     return [
       Suggestion({
+        // @tiptap/suggestion's default key is shared between every
+        // Suggestion() call — ProseMirror rejects duplicates ("Adding
+        // different instances of a keyed plugin"). Mention uses the
+        // built-in default; Reference needs its own key to coexist with
+        // Mention AND any future Suggestion (StreamSuggestion already does).
+        pluginKey: new PluginKey('suggestionReference'),
         editor: this.editor,
         char: '[[',
-        allowedPrefixes: null,
+        // Default `allowedPrefixes` ([" "]) — popup fires only when "[["
+        // starts at the trigger spot AND the char before it is whitespace
+        // or start-of-doc. Previously null (mid-word firing), which let a
+        // stray "[[" mid-sentence open the popup and was the same class of
+        // bug a mid-word `##` surfaced in the stream popup.
         items: ({ query }) => searchItems(query),
         command: ({ editor, range, props }: any) => {
           const item = props as RefItem

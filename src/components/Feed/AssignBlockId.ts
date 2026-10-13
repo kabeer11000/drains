@@ -25,6 +25,7 @@ export interface BlockIdentity {
   publicUserId: string
   name: string
   color: string
+  email: string
 }
 
 // Every top-level paragraph must have an entryId to be linkable to a
@@ -35,7 +36,7 @@ export const AssignBlockId = Extension.create<{ getIdentity: () => BlockIdentity
   name: 'assignBlockId',
 
   addOptions() {
-    return { getIdentity: () => ({ publicUserId: '', name: '', color: '' }) }
+    return { getIdentity: () => ({ publicUserId: '', name: '', color: '', email: '' }) }
   },
 
   addProseMirrorPlugins() {
@@ -119,6 +120,7 @@ export const AssignBlockId = Extension.create<{ getIdentity: () => BlockIdentity
             tr!.setNodeAttribute(pos, 'updatedAt', null)
             tr!.setNodeAttribute(pos, 'createdAt', Date.now())
             tr!.setNodeAttribute(pos, 'createdByName', identity.name)
+            tr!.setNodeAttribute(pos, 'createdByEmail', identity.email)
             // The split-off half is newly human-edited content, not the
             // machine-generated entry it was copied from — an AI summary
             // (or GitHub-ingested entry) split via Mod-Shift-Enter would
@@ -135,6 +137,7 @@ export const AssignBlockId = Extension.create<{ getIdentity: () => BlockIdentity
             tr!.setNodeAttribute(pos, 'updatedAt', null)
             tr!.setNodeAttribute(pos, 'createdAt', Date.now())
             tr!.setNodeAttribute(pos, 'createdByName', identity.name)
+            tr!.setNodeAttribute(pos, 'createdByEmail', identity.email)
           }
 
           if (tr) tr.setMeta('addToHistory', false)

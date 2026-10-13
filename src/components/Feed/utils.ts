@@ -1,3 +1,7 @@
+import { decodeTime } from 'ulid'
+import { $feedFilter, $searchJump, $streams, showAllEntries } from '@/stores/streams'
+import { isPristine, selectStream } from './feedFilter'
+import { slugOfStream } from '@/services/streams'
 export function relativeTime(ts: number) {
   const diff = Date.now() - ts
   const min = Math.floor(diff / 60000)
@@ -24,4 +28,59 @@ export function safeColor(val: any): string {
   if (typeof val === 'string' && val.trim()) return val
   if (val && typeof val === 'object' && typeof val.color === 'string') return val.color
   return '#999'
+}
+
+// Day an entry belongs to, read from the time encoded in its id rather than
+// createdAt — the feed is ordered by id, and the two disagree for split
+// entries: the split-off half keeps an id derived from its neighbour
+// (AssignBlockId/idBetween, so the same time prefix) but gets a fresh
+// createdAt. Grouping by createdAt dropped those entries out of the day
+// they visibly sit in, leaving gaps in that day's summary.
+export function entryDayTs(entryId: string, createdAt: unknown) {
+  try {
+    return decodeTime(entryId.slice(0, 26))
+  } catch {
+    return Number(createdAt)
+  }
+}
+
+export function dayLabel(ts: number) {
+  const d = new Date(ts)
+  const today = new Date()
+  if (d.toDateString() === today.toDateString()) return 'Today'
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (d.toDateString() === yesterday.toDateString()) return 'Yesterday'
+  return d.toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: d.getFullYear() !== today.getFullYear() ? 'numeric' : undefined,
+  })
+}
+
+export function scrollFeedToTop() {
+  document.querySelector('[data-feed-scroller]')?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+// The "All entries" control (sidebar row, mobile bar, Alt+0): clears every
+// filter and search; pressed again on an unfiltered feed, back to the top.
+export function goToAllEntries() {
+  if (isPristine($feedFilter.get(), !!$searchJump.get()?.query)) scrollFeedToTop()
+  else showAllEntries()
+}
+
+// Alt+1..9 opens the Nth stream (sidebar order), Alt+0 is All entries.
+// Alt rather than Ctrl/Cmd: those digits switch browser tabs.
+export function handleChannelShortcut(e: KeyboardEvent): boolean {
+  if (!e.altKey || e.ctrlKey || e.metaKey || !/^Digit[0-9]$/.test(e.code)) return false
+  const n = Number(e.code.slice(5))
+  if (n === 0) {
+    goToAllEntries()
+    return true
+  }
+  const stream = $streams.get()[n - 1]
+  if (!stream) return false
+  $searchJump.set(null)
+  $feedFilter.set(selectStream({ ...$feedFilter.get(), streams: new Set() }, slugOfStream(stream), false))
+  return true
 }

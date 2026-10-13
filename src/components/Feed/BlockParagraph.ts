@@ -49,6 +49,14 @@ export const BlockParagraph = Paragraph.extend({
         renderHTML: (attrs: any) =>
           attrs.createdByName ? { 'data-created-by': attrs.createdByName } : {},
       },
+      // Streams' author filter (authorKeyOf in feedFilter.ts) keys human
+      // authors off this, not the display name — names collide, emails don't.
+      createdByEmail: {
+        default: null,
+        parseHTML: (el: HTMLElement) => el.getAttribute('data-created-by-email'),
+        renderHTML: (attrs: any) =>
+          attrs.createdByEmail ? { 'data-created-by-email': attrs.createdByEmail } : {},
+      },
       // Set only for entries created by an integration (e.g. GitHub webhook
       // ingestion, see api/ingest/[token].ts) — distinguishes bot-authored
       // entries from ones a person typed, so EntryBlockView can render a

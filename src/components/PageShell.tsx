@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Menu } from 'lucide-react'
 import AppSidebar, { $sidebarOpen } from './AppSidebar'
-import { CommandPalette } from './CommandPalette'
+import { CommandPalette, SearchTrigger } from './CommandPalette'
 
 export default function PageShell({ children }: { children: ReactNode }) {
   return (
@@ -18,6 +18,7 @@ export default function PageShell({ children }: { children: ReactNode }) {
         >
           <Menu className="size-4" />
         </button>
+        <SearchTrigger />
         <div className="flex h-full min-h-0 flex-col">
           {children}
         </div>

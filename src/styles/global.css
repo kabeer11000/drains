@@ -2,6 +2,12 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
+/* Scan every source file, not just the modules the dev server happens to
+   have loaded: in dev, the server-rendered CSS otherwise missed classes
+   used only in client components, and Astro's ClientRouter swapped that
+   incomplete sheet in on navigation (the search pill lost its width). */
+@source "../";
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -196,6 +202,13 @@
     transition: box-shadow 0.1s;
 }
 
+/* Every card keeps a gutter for its details button (EntryBlockView) —
+   always visible on touch screens, on hover elsewhere — so it never sits
+   on top of text. */
+.tiptap p[data-entry-id] {
+    padding-right: 40px;
+}
+
 .tiptap p[data-entry-id]:hover {
     box-shadow: 0 2px 8px oklch(0 0 0 / 0.08);
 }
@@ -284,6 +297,9 @@
 .feed-scroll {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+    /* Reserve the scrollbar's width even when nothing overflows, so a
+       short stream or day list doesn't widen the content next to it. */
+    scrollbar-gutter: stable;
 }
 
 .feed-scroll::-webkit-scrollbar {
@@ -313,4 +329,16 @@
 @keyframes dogWalkFrames {
     from { background-position: 0 0; }
     to { background-position: -384px 0; }
+}
+
+/* Search (CommandPalette + Feed/SearchHighlight.ts): every hit in the feed,
+   plus a ring on the entry the bar is currently on. */
+.tiptap .search-hit {
+    background: color-mix(in oklch, oklch(0.85 0.17 85) 45%, transparent);
+    border-radius: 2px;
+    box-shadow: 0 0 0 1px color-mix(in oklch, oklch(0.85 0.17 85) 45%, transparent);
+}
+
+.tiptap p[data-entry-id].search-active {
+    box-shadow: 0 0 0 2px color-mix(in oklch, oklch(0.85 0.17 85) 70%, transparent);
 }

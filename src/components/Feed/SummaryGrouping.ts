@@ -15,6 +15,35 @@ import { Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
 // summary) is the true end of the whole chain. Recomputed from scratch on
 // every doc-changing transaction — deleting a summary means the next scan
 // simply finds one fewer link in the chain, no cleanup logic needed.
+export interface ChainBlock {
+  entryId?: string | null
+  isSummary: boolean
+  claims?: string[]
+}
+
+// Which blocks the thread bar runs through. A summary's thread spans every
+// block from the summary down to the LAST entry it claims, not only the
+// claimed entries themselves: an entry added to that day after summarizing
+// (or split off a claimed one) sits inside the range without being in
+// summarizedEntryIds, and treating it as outside broke the bar into pieces.
+export function chainFlags(blocks: ChainBlock[]): boolean[] {
+  const flags = blocks.map((b) => b.isSummary)
+  const indexById = new Map<string, number>()
+  blocks.forEach((b, i) => {
+    if (b.entryId) indexById.set(b.entryId, i)
+  })
+  blocks.forEach((b, start) => {
+    if (!b.isSummary || !b.claims?.length) return
+    let end = start
+    for (const id of b.claims) {
+      const i = indexById.get(id)
+      if (i !== undefined && i > end) end = i
+    }
+    for (let i = start; i <= end; i++) flags[i] = true
+  })
+  return flags
+}
+
 export const SummaryGrouping = Extension.create({
   name: 'summaryGrouping',
 
@@ -25,25 +54,24 @@ export const SummaryGrouping = Extension.create({
         appendTransaction: (transactions, _oldState, newState) => {
           if (!transactions.some((tr) => tr.docChanged)) return null
 
-          const claimed = new Set<string>()
-          newState.doc.forEach((node) => {
-            if (node.type.name === 'paragraph' && node.attrs.source === 'ai-summary' && node.attrs.summarizedEntryIds) {
-              for (const id of node.attrs.summarizedEntryIds) claimed.add(id)
-            }
-          })
-
           // Collected as a plain array first, then walked with a normal
           // index-based loop (not nested closures) — TypeScript loses
           // narrowing on a `let` reassigned inside a forEach callback, same
           // class of issue already hit elsewhere in this codebase
           // (EditorToolbar.tsx's currentBlock).
-          const paragraphs: { pos: number; isSummary: boolean; inChain: boolean }[] = []
+          const blocks: ChainBlock[] = []
+          const positions: number[] = []
           newState.doc.forEach((node, pos) => {
             if (node.type.name !== 'paragraph') return
-            const isSummary = node.attrs.source === 'ai-summary'
-            const inChain = isSummary || claimed.has(node.attrs.entryId)
-            paragraphs.push({ pos, isSummary, inChain })
+            blocks.push({
+              entryId: node.attrs.entryId,
+              isSummary: node.attrs.source === 'ai-summary',
+              claims: node.attrs.summarizedEntryIds ?? undefined,
+            })
+            positions.push(pos)
           })
+          const chain = chainFlags(blocks)
+          const paragraphs = blocks.map((b, i) => ({ pos: positions[i], isSummary: b.isSummary, inChain: chain[i] }))
 
           const changes: {
             pos: number

@@ -1,21 +1,39 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useStore } from '@nanostores/react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import { DOMSerializer } from '@tiptap/pm/model'
 import { ulid } from 'ulid'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Loader2 } from 'lucide-react'
 import { getDrainDb } from '@/services/db'
 import { $identity } from '@/services/identity'
 import { loadLatestPage, loadOlderPage } from '@/utils/ulid-pages'
 import { createEntry, saveEntry, deleteEntry, resolveConflicts, type EntryIdentity } from '@/services/entries'
 import { loadComments, watchComments, createComment, deleteComment, type CommentDoc } from '@/services/comments'
 import { summarizeEntries } from '@/services/aiApi'
+import { slugOfStream, linkEntry, unlinkEntry } from '@/services/streams'
+import { $streams, $streamLinks, $feedFilter, $activeDrain, $searchJump } from '@/stores/streams'
+import {
+  authorKeyOf,
+  isEntryVisible,
+  isFilterActive,
+  describeAuthorKey,
+  singleSelectedStream,
+  UNSORTED,
+  EMPTY_FILTER,
+} from './feedFilter'
+import { parseQuery, isEmptyQuery, matchesEntry } from './search'
+import { SearchHighlight, searchableOf, streamsBySlugOf, setSearchHighlight } from './SearchHighlight'
+import { SearchPill } from './SearchPill'
+import { SyncBanner } from './SyncBanner'
+import { StreamBar } from './StreamBar'
 // @ts-ignore - plain JS module
 import { sanitizeHtml } from '@/services/sanitize'
 import { BlockParagraph } from './BlockParagraph'
 import { AssignBlockId } from './AssignBlockId'
 import { SummaryGrouping } from './SummaryGrouping'
+import { StreamFilter, setHiddenEntries } from './StreamFilter'
+import { showSummarySkeleton } from './SummarySkeleton'
 import { CommentMark } from './CommentMark'
 import { createMentionExtension } from './MentionExtension'
 import { ReferenceExtension } from './ReferenceExtension'
@@ -23,7 +41,10 @@ import { CommentsAside } from './CommentsAside'
 import { OutlineAside } from './OutlineAside'
 import { AddCommentPopover } from './AddCommentPopover'
 import { EditorToolbar } from './EditorToolbar'
-import { safeName, safeColor } from './utils'
+import { useDrainStreams } from './useDrainStreams'
+import { createStreamSuggestion } from './StreamSuggestion'
+import { safeName, safeColor, handleChannelShortcut } from './utils'
+import { X } from 'lucide-react'
 
 const PAGE_SIZE = 50
 const SAVE_DEBOUNCE_MS = 500
@@ -59,6 +80,7 @@ function entryToBlockHtml(entry: any, rid: string) {
   if (entry.updatedAt) p.setAttribute('data-updated-at', String(entry.updatedAt))
   if (entry.createdAt) p.setAttribute('data-created-at', String(entry.createdAt))
   p.setAttribute('data-created-by', safeName(entry.createdByName ?? entry.updatedByName))
+  if (entry.createdByEmail) p.setAttribute('data-created-by-email', entry.createdByEmail)
   if (entry.source) p.setAttribute('data-source', entry.source)
   if (entry.viaToken) p.setAttribute('data-via-token', entry.viaToken)
   if (entry.summarizedEntryIds?.length) {
@@ -74,6 +96,27 @@ export default function Feed({ dbName }: { dbName: string }) {
   const entryPrefix = 'entry:'
   const rawId = (fullId: string) => fullId.slice(entryPrefix.length)
   const fullId = (rid: string) => `${entryPrefix}${rid}`
+
+  useDrainStreams(dbName)
+  const streams = useStore($streams)
+  const streamLinks = useStore($streamLinks)
+  const feedFilter = useStore($feedFilter)
+  // EntryBlockView's chips/+# popover are Tiptap NodeViews — they can't
+  // receive a dbName prop the way OutlineAside/EditorToolbar can, so this
+  // is the one bit of context they read back out of a store instead.
+  useEffect(() => {
+    $activeDrain.set({ dbName })
+    return () => {
+      if ($activeDrain.get()?.dbName === dbName) $activeDrain.set(null)
+    }
+  }, [dbName])
+  const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
+  const hiddenIdsRef = useRef(hiddenIds)
+  hiddenIdsRef.current = hiddenIds
+  const searchJump = useStore($searchJump)
+  // Entries (not the composer or AI summaries) currently shown — drives the
+  // channel header's count and its empty state.
+  const [visibleCount, setVisibleCount] = useState(0)
 
   const scrollRef = useRef<HTMLDivElement>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
@@ -138,7 +181,10 @@ export default function Feed({ dbName }: { dbName: string }) {
       CommentMark,
       AssignBlockId.configure({ getIdentity: () => identityRef.current }),
       SummaryGrouping,
+      StreamFilter,
+      SearchHighlight,
       createMentionExtension(dbName),
+      createStreamSuggestion(dbName),
       ReferenceExtension,
     ],
     content: '',
@@ -265,10 +311,21 @@ export default function Feed({ dbName }: { dbName: string }) {
     for (const rid of existsInDbRef.current) {
       if (!currentIds.has(rid)) {
         ops.push(
-          deleteEntry(db, fullId(rid)).then(() => {
+          deleteEntry(db, fullId(rid)).then(async () => {
             existsInDbRef.current.delete(rid)
             lastSavedRef.current.delete(rid)
             lastAuthorRef.current.delete(rid)
+            // Drop any streamlinks that pointed at this now-deleted entry,
+            // otherwise the rail's "files in X" count stays one too high
+            // for the stream until the stream itself is deleted. loadLinks
+            // returns the full map but it's already cached in
+            // $streamLinks — we'd rather just unlink the slugs we know
+            // about from the live store rather than re-querying.
+            const links = $streamLinks.get().get(rid)
+            if (links) {
+              const ops2 = [...links].map((slug) => unlinkEntry(db, rid, slug))
+              await Promise.all(ops2)
+            }
           })
         )
       }
@@ -381,6 +438,49 @@ export default function Feed({ dbName }: { dbName: string }) {
       ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
   }, [initialLoaded])
 
+  // Shared by both the scroll-triggered pagination below and the
+  // filter-active "load everything" effect further down — one place that
+  // knows how to bring in the next older page, so neither path duplicates
+  // the other's addToHistory/re-serialized-baseline handling.
+  const loadOlderPageIntoEditor = useCallback(async () => {
+    if (!editor) return
+    if (loadingOlderRef.current || !hasMoreRef.current || !oldestFullIdRef.current) return
+
+    loadingOlderRef.current = true
+    const page = await loadOlderPage(db, oldestFullIdRef.current, PAGE_SIZE)
+
+    if (page.length > 0) {
+      const html = page.map((e: any) => entryToBlockHtml(e, rawId(e._id))).join('')
+      // Same addToHistory + re-serialized-baseline fixes as the
+      // initial load above (see that comment for why preventUpdate
+      // isn't used here — it broke ensureLeadingComposer).
+      editor
+        .chain()
+        .insertContentAt(editor.state.doc.content.size, html, { updateSelection: false })
+        .command(({ tr }: any) => {
+          tr.setMeta('addToHistory', false)
+          return true
+        })
+        .run()
+      page.forEach((e: any) => {
+        const rid = rawId(e._id)
+        existsInDbRef.current.add(rid)
+        if (e.updatedByName) lastAuthorRef.current.set(rid, { name: e.updatedByName, color: e.updatedByColor })
+      })
+      page.forEach((e: any) => {
+        const rid = rawId(e._id)
+        const block = findBlock(rid)
+        lastSavedRef.current.set(rid, block ? serializeBlockContent(editor, block.node) : e.content)
+      })
+      oldestFullIdRef.current = page[page.length - 1]._id
+    } else {
+      // Issue 7 fix: anchor was deleted, stop pagination gracefully
+      hasMoreRef.current = false
+    }
+    loadingOlderRef.current = false
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, db])
+
   // Load older pages when the bottom sentinel scrolls into view — older
   // entries append at the end, which doesn't disturb the current scroll
   // position (unlike prepending at the top did in the old oldest-first order).
@@ -390,42 +490,9 @@ export default function Feed({ dbName }: { dbName: string }) {
     if (!sentinel || !scrollEl || !editor || !initialLoaded) return
 
     const observer = new IntersectionObserver(
-      async (observerEntries) => {
+      (observerEntries) => {
         if (!observerEntries[0].isIntersecting) return
-        if (loadingOlderRef.current || !hasMoreRef.current || !oldestFullIdRef.current) return
-
-        loadingOlderRef.current = true
-        const page = await loadOlderPage(db, oldestFullIdRef.current, PAGE_SIZE)
-
-        if (page.length > 0) {
-          const html = page.map((e: any) => entryToBlockHtml(e, rawId(e._id))).join('')
-          // Same addToHistory + re-serialized-baseline fixes as the
-          // initial load above (see that comment for why preventUpdate
-          // isn't used here — it broke ensureLeadingComposer).
-          editor
-            .chain()
-            .insertContentAt(editor.state.doc.content.size, html, { updateSelection: false })
-            .command(({ tr }: any) => {
-              tr.setMeta('addToHistory', false)
-              return true
-            })
-            .run()
-          page.forEach((e: any) => {
-            const rid = rawId(e._id)
-            existsInDbRef.current.add(rid)
-            if (e.updatedByName) lastAuthorRef.current.set(rid, { name: e.updatedByName, color: e.updatedByColor })
-          })
-          page.forEach((e: any) => {
-            const rid = rawId(e._id)
-            const block = findBlock(rid)
-            lastSavedRef.current.set(rid, block ? serializeBlockContent(editor, block.node) : e.content)
-          })
-          oldestFullIdRef.current = page[page.length - 1]._id
-        } else {
-          // Issue 7 fix: anchor was deleted, stop pagination gracefully
-          hasMoreRef.current = false
-        }
-        loadingOlderRef.current = false
+        loadOlderPageIntoEditor()
       },
       { root: scrollEl }
     )
@@ -433,6 +500,76 @@ export default function Feed({ dbName }: { dbName: string }) {
     return () => observer.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, db, initialLoaded])
+
+  // While any filter is active, the rail's stream/author counts and the
+  // "matches" search count need to reflect the WHOLE drain, not just
+  // whatever happened to be scrolled past — so keep paging in older
+  // entries until there's nothing left, instead of waiting on the sentinel.
+  // ponytail: this loads the entire drain into the editor for as long as a
+  // filter stays active — fine at this app's real per-drain entry counts;
+  // a drain with tens of thousands of entries would need a server-side
+  // count/search instead of "load everything" client-side.
+  const needsWholeDrain = isFilterActive(feedFilter) || feedFilter.query.trim().length > 0
+  useEffect(() => {
+    if (!initialLoaded || !needsWholeDrain) return
+    let cancelled = false
+    ;(async () => {
+      while (!cancelled && hasMoreRef.current) {
+        // The scroll sentinel may be mid-load. loadOlderPageIntoEditor then
+        // returns at once, and awaiting that in a tight loop never yields
+        // to the event loop — the in-flight load can't finish and the tab
+        // pins a CPU core. Wait for it instead.
+        if (loadingOlderRef.current) {
+          await new Promise((r) => setTimeout(r, 50))
+          continue
+        }
+        // Nothing to page from yet: loadOlderPageIntoEditor would return at
+        // once too, so stop rather than spin.
+        if (!oldestFullIdRef.current) break
+        await loadOlderPageIntoEditor()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [initialLoaded, needsWholeDrain, loadOlderPageIntoEditor])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (handleChannelShortcut(e)) e.preventDefault()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  // Search: highlight the query's words (while stepping through picked
+  // results, or while "only matches" filters the feed) and bring the
+  // current result into view — paging older entries in if it isn't loaded
+  // yet, and leaving a channel that would hide it.
+  useEffect(() => {
+    if (!editor || !initialLoaded) return
+    const query = searchJump?.query ?? (feedFilter.onlyMatches ? feedFilter.query : '')
+    const target = searchJump ? searchJump.entryIds[searchJump.index] ?? null : null
+    setSearchHighlight(editor, { terms: parseQuery(query).terms, activeEntryId: target })
+    if (!target) return
+
+    let cancelled = false
+    ;(async () => {
+      while (!cancelled && !findBlock(target) && hasMoreRef.current) await loadOlderPageIntoEditor()
+      if (cancelled) return
+      if (hiddenIdsRef.current.has(target)) $feedFilter.set({ ...EMPTY_FILTER })
+      // A frame for the un-hide to render before measuring the scroll.
+      requestAnimationFrame(() =>
+        editor.view.dom
+          .querySelector(`p[data-entry-id="${target}"]`)
+          ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      )
+    })()
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, initialLoaded, searchJump, feedFilter.onlyMatches, feedFilter.query])
 
   // Live changes feed — patch just the affected block, never the whole doc.
   // Issue 2 fix: use update_seq captured after initial load so no gap.
@@ -512,6 +649,7 @@ export default function Feed({ dbName }: { dbName: string }) {
                 tr.setNodeAttribute(block.pos, 'updatedAt', doc.updatedAt)
                 tr.setNodeAttribute(block.pos, 'createdAt', doc.createdAt)
                 tr.setNodeAttribute(block.pos, 'createdByName', safeName(doc.createdByName ?? doc.updatedByName))
+                tr.setNodeAttribute(block.pos, 'createdByEmail', doc.createdByEmail ?? doc.updatedByEmail ?? null)
                 tr.setMeta('addToHistory', false)
                 return true
               })
@@ -612,6 +750,110 @@ export default function Feed({ dbName }: { dbName: string }) {
     }
   }, [db])
 
+  // When the current filter was set. An entry YOU created after this moment
+  // stays pinned (see the visibility effect below), so typing a new entry a
+  // filter would otherwise hide doesn't make it vanish out from under you.
+  // Keyed on author + createdAt rather than "wasn't in the doc when the
+  // filter changed": older pages pulled in by load-all and other people's
+  // synced entries also weren't in the doc yet, and must still be filtered.
+  const filterSetAtRef = useRef(Date.now())
+  useEffect(() => {
+    filterSetAtRef.current = Date.now()
+  }, [feedFilter])
+
+  // Recomputes which top-level paragraphs the current filter hides and
+  // hands the result to StreamFilter's decoration plugin. Runs on every
+  // editor 'update' (so newly-typed/synced text/authors are reflected) and
+  // whenever the streams/links/filter themselves change.
+  useEffect(() => {
+    if (!editor) return
+
+    const recomputeVisibility = () => {
+      if (!isFilterActive(feedFilter)) {
+        if (setHiddenEntries(editor, new Set())) setHiddenIds(new Set())
+        return
+      }
+      let shown = 0
+
+      const liveSlugs = new Set(streams.map(slugOfStream))
+      const bySlug = streamsBySlugOf(streams)
+      const query = parseQuery(feedFilter.query)
+      const searching = feedFilter.onlyMatches && !isEmptyQuery(query)
+      const selectionEntryId = editor.state.selection.$from.parent.attrs?.entryId
+      const myEmail = identityRef.current?.email?.toLowerCase()
+      const hidden = new Set<string>()
+
+      editor.state.doc.forEach((node: any) => {
+        if (node.type.name !== 'paragraph' || !node.attrs.entryId) return
+        const entryId = node.attrs.entryId
+        const links = streamLinks.get(entryId)
+        // Never hide the composer, the entry being edited, or one you just
+        // wrote under this filter — otherwise new text vanishes mid-typing.
+        const pinned =
+          !!node.attrs.isComposer ||
+          entryId === selectionEntryId ||
+          (!!myEmail &&
+            node.attrs.createdByEmail?.toLowerCase() === myEmail &&
+            Number(node.attrs.createdAt) >= filterSetAtRef.current)
+        const visible = isEntryVisible(
+          {
+            authorKey: authorKeyOf(node.attrs),
+            pinned,
+            matches: searching ? matchesEntry(searchableOf(node, links, bySlug), query) : undefined,
+          },
+          links,
+          liveSlugs,
+          feedFilter
+        )
+        if (!visible) hidden.add(entryId)
+        else if (!node.attrs.isComposer && node.attrs.source !== 'ai-summary') shown++
+      })
+      setVisibleCount(shown)
+
+      // Only touch React state when the hidden set actually changed —
+      // this runs on every keystroke via the 'update' listener.
+      if (setHiddenEntries(editor, hidden)) setHiddenIds(hidden)
+    }
+
+    recomputeVisibility()
+    editor.on('update', recomputeVisibility)
+    return () => {
+      editor.off('update', recomputeVisibility)
+    }
+  }, [editor, feedFilter, streams, streamLinks])
+
+  // "The composer follows the view": while exactly one stream channel is open
+  // (singleSelectedStream), a brand-new entry typed in the composer is auto-filed into it
+  // the moment it has an entryId (AssignBlockId assigns one on the very
+  // first keystroke, see its appendTransaction). inheritedRef is just to
+  // avoid re-issuing the same (idempotent) linkEntry call on every
+  // keystroke — linkEntry itself already no-ops a repeat link via its own
+  // 409 handling either way.
+  const inheritedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!editor) return
+    const slug = singleSelectedStream(feedFilter)
+    if (!slug || !streams.some((s) => slugOfStream(s) === slug)) return
+
+    const maybeInherit = () => {
+      const first = editor.state.doc.firstChild
+      // Only once something is typed: filing the empty composer left a link
+      // to an entry that never got written, inflating the stream's count.
+      if (!first || !first.attrs.isComposer || !first.attrs.entryId || first.content.size === 0) return
+      const entryId = first.attrs.entryId
+      if (inheritedRef.current.has(entryId)) return
+      inheritedRef.current.add(entryId)
+      const identity = identityRef.current
+      if (identity) linkEntry(db, entryId, slug, identity)
+    }
+
+    maybeInherit()
+    editor.on('update', maybeInherit)
+    return () => {
+      editor.off('update', maybeInherit)
+    }
+  }, [editor, streams, feedFilter, db])
+
   // Applying/removing the comment mark is a normal doc edit — it rides the
   // existing onUpdate -> scheduleSave -> flushBlocks path, so no separate
   // save call is needed here or in handleDeleteComment below.
@@ -666,6 +908,9 @@ export default function Feed({ dbName }: { dbName: string }) {
   const handleSummarize = async (key: string, entryIds: string[]) => {
     setSummarizingKey(key)
     setSummarizeError(null)
+    // entryIds come in doc order, so [0] is the day's topmost entry — the
+    // one the summary lands directly above.
+    const hideSkeleton = editor && entryIds[0] ? showSummarySkeleton(editor, entryIds[0]) : null
     try {
       await summarizeEntries(dbName, entryIds)
     } catch (err: any) {
@@ -674,6 +919,7 @@ export default function Feed({ dbName }: { dbName: string }) {
       // daily AI limit was reached), not just watch the skeleton vanish.
       setSummarizeError(err?.message || 'Failed to summarize')
     } finally {
+      hideSkeleton?.()
       setSummarizingKey(null)
     }
   }
@@ -691,52 +937,61 @@ export default function Feed({ dbName }: { dbName: string }) {
       )}
       <div className="relative min-h-0 flex-1">
         <div
-          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-16"
+          className="pointer-events-none absolute inset-x-0 top-0 z-10 h-24 lg:h-16"
           style={{ background: 'linear-gradient(to bottom, var(--background), transparent)' }}
         />
         <div
           className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-8"
           style={{ background: 'linear-gradient(to top, var(--background), transparent)' }}
         />
+        <StreamBar />
         {editor && <EditorToolbar editor={editor} anchorRef={editorColumnRef} />}
-        <div ref={scrollRef} className="feed-scroll h-full overflow-y-auto px-2 pt-16 pb-16">
-        <div className="flex gap-4">
+        {/* The channel sidebar is its own column OUTSIDE the scroller. Inside
+            it (as a sticky child) its resting spot depended on the feed's
+            scroll state and height, so it sat 64px lower on drains with
+            entries than on empty ones. Out here only the entries scroll. */}
+        <div className="flex h-full gap-4 pl-2">
           {editor && (
-            <OutlineAside editor={editor} summarizingKey={summarizingKey} onSummarize={handleSummarize} />
+            <OutlineAside
+              editor={editor}
+              dbName={dbName}
+              hiddenEntryIds={hiddenIds}
+              summarizingKey={summarizingKey}
+              onSummarize={handleSummarize}
+            />
           )}
-          <div ref={editorColumnRef} className="min-w-0 flex-1">
-            {summarizingKey && (
-              <div className="mb-1.5 flex items-center gap-2 rounded-lg border border-violet-200 bg-violet-50 p-3 dark:border-violet-800 dark:bg-violet-500/10">
-                <Loader2 className="size-3.5 shrink-0 animate-spin text-violet-500 dark:text-violet-400" />
-                <div className="flex-1 space-y-1.5">
-                  <div className="ai-shimmer h-2.5 w-3/4 rounded-full" />
-                  <div className="ai-shimmer h-2.5 w-1/2 rounded-full" />
+        <div ref={scrollRef} data-feed-scroller className="feed-scroll h-full min-w-0 flex-1 overflow-y-auto pt-24 pr-2 pb-16 lg:pt-16">
+          <div className="flex gap-4">
+            <div ref={editorColumnRef} className="min-w-0 flex-1">
+              {summarizeError && (
+                <div className="mb-1.5 flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                  {summarizeError}
+                  <button type="button" className="shrink-0 text-xs underline" onClick={() => setSummarizeError(null)}>
+                    Dismiss
+                  </button>
                 </div>
+              )}
+              <SearchPill />
+              <SyncBanner dbName={dbName} />
+              {initialLoaded && isFilterActive(feedFilter) && (
+                <ChannelHeader count={visibleCount} loadingMore={hasMoreRef.current} />
+              )}
+              {!initialLoaded && (
+                <div className="flex flex-col gap-1.5">
+                  {SKELETON_ENTRY_WIDTHS.map((width, i) => (
+                    <div key={i} className="rounded-lg border border-border bg-card p-2.5">
+                      <Skeleton className={`h-4 ${width}`} />
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className={initialLoaded ? 'min-h-full' : 'hidden'} onClick={handleContainerClick}>
+                <EditorContent editor={editor} />
               </div>
-            )}
-            {summarizeError && (
-              <div className="mb-1.5 flex items-center justify-between gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-                {summarizeError}
-                <button type="button" className="shrink-0 text-xs underline" onClick={() => setSummarizeError(null)}>
-                  Dismiss
-                </button>
-              </div>
-            )}
-            {!initialLoaded && (
-              <div className="flex flex-col gap-1.5">
-                {SKELETON_ENTRY_WIDTHS.map((width, i) => (
-                  <div key={i} className="rounded-lg border border-border bg-card p-2.5">
-                    <Skeleton className={`h-4 ${width}`} />
-                  </div>
-                ))}
-              </div>
-            )}
-            <div className={initialLoaded ? 'min-h-full' : 'hidden'} onClick={handleContainerClick}>
-              <EditorContent editor={editor} />
+              <div ref={sentinelRef} />
             </div>
-            <div ref={sentinelRef} />
+            {editor && <CommentsAside editor={editor} comments={comments} onDelete={handleDeleteComment} />}
           </div>
-          {editor && <CommentsAside editor={editor} comments={comments} onDelete={handleDeleteComment} />}
         </div>
         </div>
       </div>
@@ -772,4 +1027,55 @@ function innerOf(pHtml: string) {
 function isNearTop(el: HTMLElement | null, threshold = 120) {
   if (!el) return true
   return el.scrollTop < threshold
+}
+
+// Sits above the composer whenever the feed is narrowed: names the channel
+// (or combination), counts what's shown, and offers the way back to All.
+// When nothing matches it doubles as the empty state.
+function ChannelHeader({ count, loadingMore }: { count: number; loadingMore: boolean }) {
+  const filter = useStore($feedFilter)
+  const streams = useStore($streams)
+
+  const selected = streams.filter((s) => filter.streams.has(slugOfStream(s)))
+  const single = selected.length === 1 && filter.streams.size === 1 ? selected[0] : null
+  const extras: string[] = []
+  if (filter.authors.size) extras.push(`by ${[...filter.authors].map(describeAuthorKey).join(', ')}`)
+  if (filter.onlyMatches && filter.query.trim()) extras.push(`matching "${filter.query.trim()}"`)
+
+  return (
+    <div className="mb-3 px-1">
+      <div className="flex items-center gap-2">
+        <h2 className="flex min-w-0 flex-wrap items-baseline gap-x-2 text-lg font-semibold tracking-tight">
+          {selected.map((s) => (
+            <span key={s._id} className="truncate">
+              <span style={{ color: s.color }}>#</span>
+              {s.name}
+            </span>
+          ))}
+          {filter.streams.has(UNSORTED) && <span>Unsorted</span>}
+          {filter.streams.size === 0 && <span>All entries</span>}
+        </h2>
+        <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+          {count} {count === 1 ? 'entry' : 'entries'}
+          {extras.length > 0 && ` · ${extras.join(' · ')}`}
+        </span>
+        <button
+          type="button"
+          title="Back to all entries"
+          onClick={() => $feedFilter.set(EMPTY_FILTER)}
+          className="ml-auto flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground outline-none hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="size-3.5" />
+          All entries
+        </button>
+      </div>
+      {count === 0 && !loadingMore && (
+        <p className="mt-1 text-sm text-muted-foreground">
+          {single
+            ? `Nothing in #${single.name} yet. Write above and it's filed here, or type # in any entry.`
+            : 'No entries match.'}
+        </p>
+      )}
+    </div>
+  )
 }
