@@ -1,6 +1,6 @@
 ---
-import { NotebookPen } from "lucide-react";
 import PageShell from "@/components/PageShell";
+import HomeStart from "@/components/HomeStart";
 import Layout from "../layouts/Layout.astro";
 import LandingLayout from "@/components/LandingLayout.astro";
 import LandingPage from "@/components/LandingPage.astro";
@@ -12,17 +12,7 @@ const identity = cookie ? cookie.json() : null;
 {identity ? (
 	<Layout noindex>
 		<PageShell client:load>
-			<div class="flex flex-1 items-center justify-center">
-				<div class="flex flex-col items-center gap-2 text-center">
-					<div class="flex size-12 items-center justify-center rounded-full bg-secondary">
-						<NotebookPen className="size-5 text-muted-foreground" />
-					</div>
-					<p class="text-sm font-medium">No drain selected</p>
-					<p class="max-w-[220px] text-xs text-muted-foreground">
-						Pick a drain from the sidebar, or create a new one to get started.
-					</p>
-				</div>
-			</div>
+			<HomeStart client:load />
 		</PageShell>
 	</Layout>
 ) : (
