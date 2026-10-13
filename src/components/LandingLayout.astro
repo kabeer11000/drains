@@ -8,7 +8,7 @@ interface Props {
 
 const {
   title = 'Drains — every source drains into one log',
-  description = 'Drains is a local-first engineering log. Commits, incidents, decisions, and AI summaries all land in the same running log — synced across devices, encrypted when private, and readable by the agents working alongside you.',
+  description = 'Drains is a local-first engineering log. Commits, incidents, decisions, and AI summaries all land in the same running log — synced across devices, private to its members, and readable by the agents working alongside you.',
 } = Astro.props
 
 const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? 'https://drains.dev').toString()

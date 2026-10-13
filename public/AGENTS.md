@@ -58,11 +58,11 @@ single drain, and can be revoked at any time from the same menu.
 
 ## What an agent can do
 
-- Read and search entries in any drain the token's account can access
+- Read entries in any drain the token's account can access
 - Create new entries (@mentions and `[[ references ]]` are parsed the
   same way they are for a human-typed entry)
 - List and manage drain members
 - Update drain metadata (title, description, tags)
 
 Entries created via a token carry a `via <token name>` attribution —
-they're never indistinguishable from who actually wrote them.
+they're always distinguishable from who actually wrote them.

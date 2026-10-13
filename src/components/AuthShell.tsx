@@ -28,7 +28,7 @@ export default function AuthShell({ children }: { children: ReactNode }) {
             </div>
             <div className="flex items-center gap-2.5 text-[0.8125rem] text-muted-foreground">
               {CHECK}
-              Private drains encrypted client-side
+              Private drains visible only to members
             </div>
             <div className="flex items-center gap-2.5 text-[0.8125rem] text-muted-foreground">
               {CHECK}
