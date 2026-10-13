@@ -4,19 +4,55 @@ import PageShell from "@/components/PageShell";
 import SyncIndicator from "@/components/SyncIndicator";
 import DrainTitleChip from "@/components/DrainTitleChip";
 import Layout from "@/layouts/Layout.astro";
+import { getDirectoryDrains } from "@/lib/couchdb-admin";
 
 const cookie = Astro.cookies.get('sk_identity');
 const identity = cookie ? cookie.json() : null;
 if (!identity) return Astro.redirect('/login');
 const dbName = Astro.params.drain as string;
+
+// Only open an editor for a drain this account is actually in. Without
+// this, any /drains/<anything> URL rendered a writable feed whose entries
+// could never sync. This is a UX gate, not the security boundary: CouchDB's
+// _security and validate_doc_update still decide who can read or write.
+// If the directory can't be read, fail open and let sync report it.
+let access: 'ok' | 'missing' | 'trashed' = 'ok';
+try {
+	const entry = (await getDirectoryDrains(identity.email)).find((d) => d.dbName === dbName);
+	access = !entry ? 'missing' : entry.trashedAt ? 'trashed' : 'ok';
+} catch (err) {
+	console.error('drain access check failed', dbName, err);
+}
+if (access !== 'ok') Astro.response.status = 404;
 ---
 
 <Layout noindex>
 	<PageShell client:load>
-		<div class="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col">
-			<SyncIndicator dbName={dbName} client:load />
-			<DrainTitleChip dbName={dbName} client:load />
-			<Feed dbName={dbName} client:only="react" />
-		</div>
+		{access === 'ok' ? (
+			<div class="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col">
+				<SyncIndicator dbName={dbName} client:load />
+				<DrainTitleChip dbName={dbName} client:load />
+				<Feed dbName={dbName} client:only="react" />
+			</div>
+		) : (
+			<div class="flex flex-1 items-center justify-center px-6">
+				<div class="flex max-w-sm flex-col items-center gap-2 text-center">
+					<p class="text-base font-semibold">
+						{access === 'trashed' ? 'This drain is in the trash' : 'Drain not found'}
+					</p>
+					<p class="text-sm text-muted-foreground">
+						{access === 'trashed'
+							? 'Restore it from Trash in your account menu to open it again.'
+							: "It doesn't exist, or you haven't been invited to it. Ask the owner to invite you."}
+					</p>
+					<a
+						href="/"
+						class="mt-3 rounded-full border px-4 py-1.5 text-sm transition-colors hover:bg-accent"
+					>
+						Back to your drains
+					</a>
+				</div>
+			</div>
+		)}
 	</PageShell>
 </Layout>

@@ -1,5 +1,5 @@
 import { getDrainDb } from './db.js';
-import { $syncStatus } from '../stores/sync';
+import { patchSyncState, syncStateOf } from '../stores/sync';
 import { getAuthCredential } from './authSession';
 
 // VITE_COUCHDB_URL is a build-time value baked into this client bundle —
@@ -11,16 +11,24 @@ const REMOTE_HOST = import.meta.env.VITE_COUCHDB_URL
   : null;
 
 // One live sync handler per currently-open drain database, keyed by dbName.
-// $syncStatus reflects whichever drain was most recently active — good
-// enough for the single status pill in the UI; per-drain status isn't
-// surfaced anywhere yet.
+// Each drain's state lives under its own key in $sync (stores/sync.ts).
 const handlers = new Map();
+
+// 401/403/404 on the database itself: not a member, or no such drain.
+// Retrying never fixes these, so they're reported as a hard error rather
+// than "offline". No status at all means the request never got an answer.
+function classify(err) {
+  const status = err && (err.status || (err.result && err.result.status));
+  if (status === 401 || status === 403 || status === 404) return { status: 'error', problem: 'no-access' };
+  if (!status || (typeof navigator !== 'undefined' && navigator.onLine === false)) return { status: 'offline', problem: undefined };
+  return { status: 'error', problem: 'unknown' };
+}
 
 export function startDrainSync(dbName) {
   if (handlers.has(dbName)) return handlers.get(dbName);
   if (!REMOTE_HOST) {
     console.error('VITE_COUCHDB_URL is not set — this client bundle has no sync target.');
-    $syncStatus.set('error');
+    patchSyncState(dbName, { status: 'error', problem: 'unknown' });
     return null;
   }
   const credential = getAuthCredential();
@@ -32,13 +40,24 @@ export function startDrainSync(dbName) {
       retry: true,
       auth: { username: credential.email, password: credential.password },
     })
+    // 'paused' without an error means caught up and waiting for changes.
     .on('paused', (err) => {
-      $syncStatus.set(err ? 'error' : 'paused');
+      if (err) console.warn('sync paused with error', dbName, err);
+      patchSyncState(dbName, err ? classify(err) : { status: 'synced', problem: undefined });
     })
-    .on('active', () => $syncStatus.set('active'))
+    .on('active', () => patchSyncState(dbName, { status: 'syncing', problem: undefined }))
+    // A single change the server refused (validate_doc_update). Sync keeps
+    // going; the change just never leaves this device.
+    .on('denied', (err) => {
+      console.warn('sync denied a change', dbName, err);
+      patchSyncState(dbName, {
+        rejected: syncStateOf(dbName).rejected + 1,
+        lastRejectReason: (err && (err.reason || err.message)) || undefined,
+      });
+    })
     .on('error', (err) => {
       console.error('sync error', dbName, err);
-      $syncStatus.set('error');
+      patchSyncState(dbName, classify(err));
     });
   handlers.set(dbName, handler);
   return handler;
@@ -55,5 +74,4 @@ export function stopDrainSync(dbName) {
 export function stopAllSync() {
   handlers.forEach((h) => h.cancel());
   handlers.clear();
-  $syncStatus.set(null);
 }
