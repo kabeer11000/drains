@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro'
 import { requireAuth } from '@/lib/requireAuth'
-import { getDirectoryDrains, addDrainMember, addDirectoryDrain, getAdminDoc } from '@/lib/couchdb-admin'
+import { getDirectoryDrains, addDrainMember, addDirectoryDrain, getAdminDoc, syncDrainVisibility } from '@/lib/couchdb-admin'
 
 export const prerender = false
 
@@ -34,10 +34,12 @@ export const POST: APIRoute = async ({ request, params }) => {
   await addDirectoryDrain(email, {
     dbName,
     title: notebook?.title ?? 'Untitled',
-    visibility: notebook?.visibility ?? 'shared',
+    visibility: 'shared',
     role: 'member',
     joinedAt: Date.now(),
   })
+  // A private drain becomes shared the moment someone else is in it.
+  await syncDrainVisibility(dbName)
 
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }

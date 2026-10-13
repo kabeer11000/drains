@@ -684,7 +684,7 @@ export async function deleteUserEntryAsAuthor(dbName: string, entryId: string, e
 // current member's cached copy when a drain's metadata changes.
 export async function updateDirectoryMetaForAllMembers(
   dbName: string,
-  meta: { title?: string; description?: string; tags?: string[]; trashedAt?: number | null }
+  meta: { title?: string; description?: string; tags?: string[]; trashedAt?: number | null; visibility?: 'private' | 'shared' }
 ) {
   const members = await getDrainMembers(dbName)
   for (const email of members) {
@@ -698,6 +698,23 @@ export async function updateDirectoryMetaForAllMembers(
       () => ({ _id: `user:${email}`, type: 'directory', drains: [] })
     )
   }
+}
+
+// Visibility isn't a setting, it's a fact about membership: the owner is
+// always in _security.members, so anyone else there makes it 'shared'.
+// Called after every invite/removal so the notebook doc and every
+// member's directory listing (what the sidebar icons read) stay in step.
+export async function syncDrainVisibility(dbName: string): Promise<'private' | 'shared'> {
+  const members = await getDrainMembers(dbName)
+  const visibility = members.length > 1 ? 'shared' : 'private'
+  await updateAdminDoc(
+    dbName,
+    'notebook',
+    (doc) => ({ ...doc, visibility }),
+    () => ({ _id: 'notebook', type: 'notebook', visibility })
+  )
+  await updateDirectoryMetaForAllMembers(dbName, { visibility })
+  return visibility
 }
 
 // Soft-delete: "deleting" a drain marks it trashed instead of destroying

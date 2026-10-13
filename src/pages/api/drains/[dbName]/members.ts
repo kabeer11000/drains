@@ -1,6 +1,12 @@
 import type { APIRoute } from 'astro'
 import { requireAuth } from '@/lib/requireAuth'
-import { getDirectoryDrains, getDrainMembers, removeDrainMember, removeDirectoryDrain } from '@/lib/couchdb-admin'
+import {
+  getDirectoryDrains,
+  getDrainMembers,
+  removeDrainMember,
+  removeDirectoryDrain,
+  syncDrainVisibility,
+} from '@/lib/couchdb-admin'
 
 export const prerender = false
 
@@ -40,6 +46,8 @@ export const DELETE: APIRoute = async ({ request, params }) => {
 
   await removeDrainMember(dbName, email)
   await removeDirectoryDrain(email, dbName)
+  // Removing the last other person turns it back into a private drain.
+  await syncDrainVisibility(dbName)
 
   return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
