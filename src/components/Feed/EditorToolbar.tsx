@@ -1,38 +1,7 @@
 import { useEffect, useState, type RefObject } from 'react'
 import type { Editor } from '@tiptap/react'
-import { Bold, Italic, Underline, Strikethrough, Code, Eraser, Wand2, Loader2 } from 'lucide-react'
-import { cleanupText } from '@/services/aiApi'
-
-// Finds the top-level paragraph node the cursor is currently inside — every
-// top-level node in this doc is a block/entry (see BlockParagraph.ts), so
-// there's always exactly one match.
-function currentBlock(editor: Editor): { pos: number; node: any } | null {
-  const { from } = editor.state.selection
-  let found: { pos: number; node: any } | null = null
-  editor.state.doc.forEach((node, pos) => {
-    if (from >= pos && from <= pos + node.nodeSize) found = { pos, node }
-  })
-  return found
-}
-
-// Re-locates a block by entryId rather than trusting a position captured
-// before the AI round-trip — other edits (this user's or a synced remote
-// change) could easily shift positions during that gap.
-function findBlockByEntryId(editor: Editor, entryId: string): { pos: number; node: any } | null {
-  let found: { pos: number; node: any } | null = null
-  editor.state.doc.forEach((node, pos) => {
-    if (node.attrs.entryId === entryId) found = { pos, node }
-  })
-  return found
-}
-
-function setCleaningFlag(editor: Editor, pos: number, value: boolean) {
-  editor.commands.command(({ tr }: any) => {
-    tr.setNodeAttribute(pos, 'cleaning', value)
-    tr.setMeta('addToHistory', false)
-    return true
-  })
-}
+import { Bold, Italic, Underline, Strikethrough, Code, Eraser, Sparkles } from 'lucide-react'
+import { AiPanel } from './AiPanel'
 
 const BUTTONS: { mark: string; icon: typeof Bold; label: string; run: (editor: Editor) => void }[] = [
   { mark: 'bold', icon: Bold, label: 'Bold', run: (e) => e.chain().focus().toggleBold().run() },
@@ -79,39 +48,19 @@ export function EditorToolbar({
     }
   }, [anchorRef])
 
-  const [cleaning, setCleaning] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const handleCleanup = async () => {
-    const found = currentBlock(editor)
-    if (!found) return
-    const { node } = found
-    const entryId = node.attrs.entryId
-    const text = node.textContent.trim()
-    if (!text || !entryId) return
-
-    setCleaning(true)
-    setCleaningFlag(editor, found.pos, true)
-    try {
-      const { text: cleaned } = await cleanupText(text)
-      const target = findBlockByEntryId(editor, entryId)
-      if (target) {
-        const from = target.pos + 1
-        const to = target.pos + target.node.nodeSize - 1
-        editor.chain().focus().insertContentAt({ from, to }, cleaned).run()
+  // Ask AI panel (AiPanel.tsx). Ctrl/Cmd+J toggles it from anywhere in
+  // the editor.
+  const [aiOpen, setAiOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'j') {
+        e.preventDefault()
+        setAiOpen((open) => !open)
       }
-    } catch (err: any) {
-      // Leave the original text untouched on failure, but surface why —
-      // silently eating a "daily limit reached" error left users with no
-      // idea the button had stopped working for the rest of the day.
-      setError(err?.message || 'Failed to refine')
-      setTimeout(() => setError(null), 4000)
-    } finally {
-      const target = findBlockByEntryId(editor, entryId)
-      if (target) setCleaningFlag(editor, target.pos, false)
-      setCleaning(false)
     }
-  }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
 
   if (center === null) return null
 
@@ -120,11 +69,6 @@ export function EditorToolbar({
       className="fixed bottom-8 z-40 flex items-center gap-1 rounded-full border bg-background/95 px-2 py-1.5 shadow-md backdrop-blur-sm"
       style={{ left: center, transform: 'translateX(-50%)' }}
     >
-      {error && (
-        <div className="absolute -top-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border bg-background px-2.5 py-1 text-xs text-destructive shadow-sm">
-          {error}
-        </div>
-      )}
       {BUTTONS.map(({ mark, icon: Icon, label, run }) => (
         <button
           key={mark}
@@ -152,16 +96,17 @@ export function EditorToolbar({
       <div className="mx-1 h-4 w-px bg-border" />
       <button
         type="button"
-        title="Refine with AI"
+        title="Ask AI (Ctrl/⌘ J)"
+        aria-pressed={aiOpen}
         onMouseDown={(e) => e.preventDefault()}
-        onClick={handleCleanup}
-        disabled={cleaning}
-        className={`flex size-7 items-center justify-center rounded-full text-violet-500 outline-none transition-all hover:scale-110 hover:bg-violet-100 hover:text-violet-600 focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-violet-400 dark:hover:bg-violet-500/20 dark:hover:text-violet-300 ${
-          cleaning ? 'bg-violet-100 dark:bg-violet-500/20' : ''
+        onClick={() => setAiOpen((open) => !open)}
+        className={`flex size-7 items-center justify-center rounded-full text-violet-500 outline-none transition-colors hover:bg-violet-100 hover:text-violet-600 focus-visible:ring-2 focus-visible:ring-violet-400 dark:text-violet-400 dark:hover:bg-violet-500/20 dark:hover:text-violet-300 ${
+          aiOpen ? 'bg-violet-100 dark:bg-violet-500/20' : ''
         }`}
       >
-        {cleaning ? <Loader2 className="size-3.5 animate-spin" /> : <Wand2 className="size-3.5" />}
+        <Sparkles className="size-3.5" />
       </button>
+      {aiOpen && <AiPanel editor={editor} center={center} onClose={() => setAiOpen(false)} />}
     </div>
   )
 }

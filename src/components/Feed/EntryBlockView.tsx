@@ -53,7 +53,6 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
   // be empty (e.g. edited down to nothing) should look like a plain blank
   // entry, not the composer.
   const isComposer = !!node.attrs.isComposer && node.content.size === 0
-  const isCleaning = !!node.attrs.cleaning
   // Both derived by SummaryGrouping.ts from whichever summary entries
   // currently exist — revert to false on their own the moment the claiming
   // summary is deleted, no cleanup needed here. isLastInGroup is whichever
@@ -255,15 +254,6 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
             </Button>
           )}
       </LazyPopover>}
-      {isCleaning && (
-        <span
-          contentEditable={false}
-          className="pointer-events-none absolute inset-0 flex flex-col justify-center gap-1.5 px-3.5"
-        >
-          <span className="ai-shimmer h-2.5 w-3/4 rounded-full" />
-          <span className="ai-shimmer h-2.5 w-1/2 rounded-full" />
-        </span>
-      )}
       {fileable && labels.length > 0 && (
         <LazyPopover
           align="start"
@@ -289,7 +279,7 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
           <StreamPicker entryId={entryId} />
         </LazyPopover>
       )}
-      <NodeViewContent as="span" className={isCleaning ? 'invisible' : undefined} />
+      <NodeViewContent as="span" />
     </NodeViewWrapper>
   )
 }

@@ -43,6 +43,7 @@ import { useDrainStreams } from './useDrainStreams'
 import { createStreamSuggestion } from './StreamSuggestion'
 import { onlyEntryTextChanged } from './docDiff'
 import { Embed } from './EmbedExtension'
+import { AiTarget } from './AiTarget'
 import { safeName, safeColor, handleChannelShortcut, collectDays } from './utils'
 import { $comments, $summarizeDayOf, $loadWholeDrain } from '@/stores/feed'
 import { DateScrubber } from './DateScrubber'
@@ -194,6 +195,7 @@ export default function Feed({ dbName }: { dbName: string }) {
       createStreamSuggestion(dbName),
       ReferenceExtension,
       Embed,
+      AiTarget,
     ],
     content: '',
     onUpdate: () => scheduleSave(),

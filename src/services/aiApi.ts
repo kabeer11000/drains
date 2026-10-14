@@ -33,15 +33,25 @@ export async function fetchAiUsage(): Promise<AiUsage> {
   return usageRequest
 }
 
-export async function cleanupText(text: string): Promise<{ text: string }> {
-  const res = await fetch('/api/ai/cleanup', {
+// Apply a free-form instruction to some text ("make it a checklist"). The
+// result is plain text; callers insert it as text nodes, never as HTML.
+// `streams` carries the drain's stream names so the model can reuse them;
+// the answer's `streams` are names to file the entry into (when asked).
+export async function transformText(
+  text: string,
+  instruction: string,
+  streams: string[],
+  signal?: AbortSignal
+): Promise<{ text: string; streams: string[] }> {
+  const res = await fetch('/api/ai/transform', {
     method: 'POST',
     headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, instruction, streams }),
+    signal,
   })
-  const data = await parseErrorOr<{ text: string; usage: AiUsage }>(res, 'Failed to clean up text')
+  const data = await parseErrorOr<{ text: string; streams?: string[]; usage: AiUsage }>(res, 'AI request failed')
   $aiUsage.set(data.usage)
-  return data
+  return { text: data.text, streams: data.streams ?? [] }
 }
 
 export async function summarizeEntries(dbName: string, entryIds: string[]): Promise<void> {

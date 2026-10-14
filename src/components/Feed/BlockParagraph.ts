@@ -126,17 +126,6 @@ export const BlockParagraph = Paragraph.extend({
         parseHTML: () => null,
         renderHTML: () => ({}),
       },
-      // Purely transient UI state toggled by EditorToolbar's cleanup button
-      // while a MiniMax request is in flight for this block — never parsed
-      // from or rendered into stored HTML, so there's no risk of it leaking
-      // into saved content (serializeBlockContent only serializes a node's
-      // inline content, not its attrs, but keeping this one out of
-      // parseHTML/renderHTML entirely means it can never even round-trip).
-      cleaning: {
-        default: false,
-        parseHTML: () => false,
-        renderHTML: () => ({}),
-      },
     }
   },
 
