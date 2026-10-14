@@ -4,11 +4,10 @@ import { useStore } from '@nanostores/react'
 import { Clock, CornerDownLeft, Filter, Globe, Hash, Layers, PenLine, Search, User, X } from 'lucide-react'
 import { Command as CommandPrimitive } from 'cmdk'
 import { $drains } from '@/helpers/drains'
-import { getDrainDb } from '@/services/db'
-import { stripHtml } from '@/utils/stripHtml'
+import { getDrainIndex, type StreamInfo, type IndexedEntry, type DrainIndex } from '@/services/searchIndex'
 import { $activeDrain, $feedFilter, $searchJump, $streams } from '@/stores/streams'
-import { slugOfStream, buildStreamIndex } from '@/services/streams'
-import { authorKeyOf, singleSelectedStream } from '@/components/Feed/feedFilter'
+import { slugOfStream } from '@/services/streams'
+import { singleSelectedStream } from '@/components/Feed/feedFilter'
 import { parseQuery, isEmptyQuery, matchesEntry, matchRanges, snippet, type SnippetPart } from '@/components/Feed/search'
 import { entryDayTs, dayLabel, relativeTime } from '@/components/Feed/utils'
 import { Command, CommandDialog, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command'
@@ -94,93 +93,11 @@ function trailingToken(query: string): { kind: '#' | '@'; partial: string } | nu
   return m ? { kind: m[1] as '#' | '@', partial: m[2].toLowerCase() } : null
 }
 
-interface StreamInfo {
-  slug: string
-  name: string
-  color: string
-}
-
-interface IndexedEntry {
-  entryId: string
-  text: string
-  createdAt: number
-  updatedAt: number
-  done: boolean
-  streams: StreamInfo[]
-  authorName: string
-  authorKey: string
-  source?: string | null
-  viaToken?: string | null
-}
-
-interface DrainIndex {
-  dbName: string
-  title: string
-  entries: IndexedEntry[]
-  streams: StreamInfo[]
-}
-
 interface Hit {
   dbName: string
   drainTitle: string
   entry: IndexedEntry
   parts: SnippetPart[]
-}
-
-// Struck-through text is how people mark an entry done: done = there's
-// text, and none of it sits outside an <s>.
-function isDoneHtml(html: string) {
-  const outside = html.replace(/<s>[\s\S]*?<\/s>/g, '')
-  return !!stripHtml(html) && !stripHtml(outside)
-}
-
-// One read of a drain's local PouchDB: entries plus its streams and links,
-// so #stream / @person / from: / is:done work in any drain, not only the
-// one on screen. Local-first: only drains synced to this device are there.
-// Reused across opens until the drain's local DB changes (update_seq): every
-// open used to re-read and DOM-parse every entry of every drain.
-const indexCache = new Map<string, { seq: string | number; index: DrainIndex }>()
-
-async function indexDrain(dbName: string, title: string): Promise<DrainIndex> {
-  const db = getDrainDb(dbName)
-  const seq = await db
-    .info()
-    .then((i) => i.update_seq)
-    .catch(() => null)
-  const cached = indexCache.get(dbName)
-  if (seq !== null && cached && cached.seq === seq) return { ...cached.index, title }
-  const index = await buildIndex(db, dbName, title)
-  if (seq !== null) indexCache.set(dbName, { seq, index })
-  return index
-}
-
-async function buildIndex(db: PouchDB.Database, dbName: string, title: string): Promise<DrainIndex> {
-  const res = await db
-    .allDocs({ include_docs: true })
-    .catch(() => ({ rows: [] as any[] }))
-  const docs = res.rows.map((r: any) => r.doc).filter(Boolean)
-  const { streams, byEntry } = buildStreamIndex(docs)
-  const entries: IndexedEntry[] = docs
-    .filter((d: any) => d._id.startsWith('entry:') && d.content)
-    .map((d: any) => {
-      const entryId = d._id.slice('entry:'.length)
-      return {
-        entryId,
-        text: stripHtml(d.content),
-        createdAt: Number(d.createdAt),
-        updatedAt: Number(d.updatedAt ?? d.createdAt),
-        done: isDoneHtml(d.content),
-        streams: byEntry.get(entryId) ?? [],
-        authorName: d.createdByName ?? '',
-        authorKey: authorKeyOf(d),
-        source: d.source,
-        viaToken: d.viaToken,
-      }
-    })
-    .filter((e: IndexedEntry) => e.text)
-    // Newest first, same order as the feed.
-    .sort((a: IndexedEntry, b: IndexedEntry) => (a.entryId < b.entryId ? 1 : -1))
-  return { dbName, title, entries, streams }
 }
 
 function Snippet({ parts }: { parts: SnippetPart[] }) {
@@ -280,7 +197,7 @@ export function CommandPalette() {
     let cancelled = false
     const known = scope ? drains.filter((d: any) => d.dbName === scope) : drains
     const targets = scope && !known.length ? [{ dbName: scope, title: currentTitle }] : known
-    Promise.all(targets.map((d: any) => indexDrain(d.dbName, d.title || 'Untitled'))).then((all) => {
+    Promise.all(targets.map((d: any) => getDrainIndex(d.dbName, d.title || 'Untitled'))).then((all) => {
       if (!cancelled) setIndexes(all)
     })
     return () => {

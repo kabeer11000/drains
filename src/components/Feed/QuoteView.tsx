@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
 import { CornerUpLeft, X } from 'lucide-react'
 import { resolveQuote, watchQuote, type QuotedEntry } from '@/services/quotes'
-import { $activeDrain, $searchJump } from '@/stores/streams'
+import { $activeDrain } from '@/stores/streams'
+import { $jumpTo } from '@/stores/feed'
 import { stripHtml } from '@/utils/stripHtml'
 import { relativeTime, safeColor, safeName } from './utils'
 
@@ -35,7 +36,7 @@ export function QuoteView({ node, selected, deleteNode, editor }: NodeViewProps)
   }, [near, dbName, entryIdRef])
 
   const jump = () => {
-    if ($activeDrain.get()?.dbName === dbName) $searchJump.set({ query: '', entryIds: [entryIdRef], index: 0 })
+    if ($activeDrain.get()?.dbName === dbName) $jumpTo.set({ entryId: entryIdRef, block: 'center' })
     else window.location.href = `/drains/${dbName}#entry-${entryIdRef}`
   }
 

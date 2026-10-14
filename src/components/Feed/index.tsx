@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useStore } from '@nanostores/react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
@@ -7,7 +7,6 @@ import { ulid } from 'ulid'
 import { Skeleton } from '@/components/ui/skeleton'
 import { getDrainDb } from '@/services/db'
 import { $identity } from '@/services/identity'
-import { loadLatestPage, loadOlderPage } from '@/utils/ulid-pages'
 import { createEntry, saveEntry, deleteEntry, resolveConflicts, type EntryIdentity } from '@/services/entries'
 import { loadComments, watchComments, createComment, deleteComment, type CommentDoc } from '@/services/comments'
 import { summarizeEntries } from '@/services/aiApi'
@@ -45,9 +44,12 @@ import { onlyEntryTextChanged } from './docDiff'
 import { Embed } from './EmbedExtension'
 import { AiTarget } from './AiTarget'
 import { Quote } from './QuoteExtension'
+import { EntrySelectAll } from './EntrySelectAll'
 import { notifyEntryChanged } from '@/services/quotes'
 import { safeName, safeColor, handleChannelShortcut, collectDays } from './utils'
-import { $comments, $summarizeDayOf, $loadWholeDrain } from '@/stores/feed'
+import { $comments, $summarizeDayOf, $entryIndex, $sourceIds, $jumpTo } from '@/stores/feed'
+import { fetchLatest, fetchOlder, fetchNewer, fetchAround, positionOf, withId, withoutId, type EntrySource } from './entrySource'
+import { matchingIds } from '@/services/searchIndex'
 import { $sync } from '@/stores/sync'
 import { useStoreSelector } from '@/hooks/use-store-selector'
 import { DateScrubber } from './DateScrubber'
@@ -57,6 +59,15 @@ const PAGE_SIZE = 50
 // Opening a drain renders this many cards; the rest page in as you scroll.
 // Every card is a React node view, so fewer up front = a faster open.
 const INITIAL_PAGE_SIZE = 20
+// The editor never holds more than MAX_WINDOW entries: past it, offscreen
+// ones at the far end are dropped (TRIM_SLACK at a time) and paged back in
+// on the way back. Keeps the DOM and node-view count bounded for any drain
+// size. Jumps load WINDOW_NEWER above and WINDOW_OLDER below the target.
+const MAX_WINDOW = 250
+const TRIM_SLACK = 50
+const WINDOW_NEWER = 20
+const WINDOW_OLDER = 30
+const RECENT_EDIT_MS = 5 * 60_000
 const SAVE_DEBOUNCE_MS = 500
 
 // Astro's ClientRouter can swap client:only islands without reliably running
@@ -108,8 +119,6 @@ export default function Feed({ dbName }: { dbName: string }) {
   const fullId = (rid: string) => `${entryPrefix}${rid}`
 
   useDrainStreams(dbName)
-  // Whole-drain loading is per drain: the scrubber asks again when used.
-  useEffect(() => $loadWholeDrain.set(false), [dbName])
   const streams = useStore($streams)
   const streamLinks = useStore($streamLinks)
   const feedFilter = useStore($feedFilter)
@@ -147,6 +156,16 @@ export default function Feed({ dbName }: { dbName: string }) {
   const oldestFullIdRef = useRef<string | null>(null)
   const hasMoreRef = useRef(true)
   const loadingOlderRef = useRef(false)
+  // Windowing: the editor holds a contiguous window of the source's entries
+  // (newest first), never the whole drain. oldestFullIdRef/hasMoreRef above
+  // are its older end; these are its newer end and where it pages from.
+  const newestRidRef = useRef<string | null>(null)
+  // rid -> when it was last saved from this editor. Trimming skips these for
+  // RECENT_EDIT_MS so undo still has the content it needs.
+  const recentEditsRef = useRef(new Map<string, number>())
+  const hasNewerRef = useRef(false)
+  const loadingNewerRef = useRef(false)
+  const sourceRef = useRef<EntrySource>({ kind: 'all' })
   // The pagination IntersectionObserver isn't created until this flips —
   // otherwise its very first (always-fires-once) callback reports the
   // sentinel as "in view" against an empty, unscrolled container, and
@@ -211,6 +230,7 @@ export default function Feed({ dbName }: { dbName: string }) {
       Embed,
       AiTarget,
       Quote,
+      EntrySelectAll,
     ],
     content: '',
     onUpdate: () => scheduleSave(),
@@ -317,6 +337,7 @@ export default function Feed({ dbName }: { dbName: string }) {
               if (doc) {
                 existsInDbRef.current.add(rid)
                 lastSavedRef.current.set(rid, html)
+                recentEditsRef.current.set(rid, Date.now())
               }
             })
             .finally(() => saveInFlightRef.current.delete(rid))
@@ -327,6 +348,7 @@ export default function Feed({ dbName }: { dbName: string }) {
           saveEntry(db, fullId(rid), html, identity)
             .then(() => {
               lastSavedRef.current.set(rid, html)
+              recentEditsRef.current.set(rid, Date.now())
             })
             .finally(() => saveInFlightRef.current.delete(rid))
         )
@@ -389,7 +411,7 @@ export default function Feed({ dbName }: { dbName: string }) {
     if (contentInitializedRef.current) return
     let cancelled = false
 
-    Promise.all([loadLatestPage(db, INITIAL_PAGE_SIZE), db.info()]).then(([page, info]) => {
+    Promise.all([fetchLatest(db, sourceRef.current, INITIAL_PAGE_SIZE), db.info()]).then(([page, info]) => {
       if (cancelled) return
       setFirstSync(info.doc_count === 0)
       contentInitializedRef.current = true
@@ -442,6 +464,8 @@ export default function Feed({ dbName }: { dbName: string }) {
       // page is newest-first; the oldest loaded entry (pagination anchor) is last.
       oldestFullIdRef.current = page[page.length - 1]?._id ?? null
       hasMoreRef.current = page.length === INITIAL_PAGE_SIZE
+      newestRidRef.current = page[0] ? rawId(page[0]._id) : null
+      hasNewerRef.current = false
       requestAnimationFrame(() => setInitialLoaded(true))
     })
     return () => {
@@ -459,53 +483,236 @@ export default function Feed({ dbName }: { dbName: string }) {
     const hash = window.location.hash
     if (!hash.startsWith('#entry-')) return
     const entryId = hash.slice('#entry-'.length)
-    scrollRef.current
-      ?.querySelector(`[data-entry-id="${entryId}"]`)
-      ?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    jumpToEntry(entryId).then(() =>
+      requestAnimationFrame(() =>
+        scrollRef.current?.querySelector(`[data-entry-id="${entryId}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      )
+    )
   }, [initialLoaded])
 
   // Shared by both the scroll-triggered pagination below and the
   // filter-active "load everything" effect further down — one place that
   // knows how to bring in the next older page, so neither path duplicates
   // the other's addToHistory/re-serialized-baseline handling.
+  // Bookkeeping for entries just put into the editor: they exist in the DB,
+  // and their saved baseline is what they re-serialize to (see the initial
+  // load for why the raw stored content can't be used).
+  const adoptDocs = useCallback(
+    (docs: any[]) => {
+      if (!editor) return
+      for (const e of docs) {
+        const rid = rawId(e._id)
+        existsInDbRef.current.add(rid)
+        if (e.updatedByName) lastAuthorRef.current.set(rid, { name: e.updatedByName, color: e.updatedByColor })
+        const block = findBlock(rid)
+        lastSavedRef.current.set(rid, block ? serializeBlockContent(editor, block.node) : e.content)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor, findBlock]
+  )
+
+  // An entry leaving the editor (windowing, not deletion) must be forgotten
+  // BEFORE its node is removed: flushBlocks deletes any entry it knows exists
+  // but can't find in the doc.
+  const forget = (rid: string) => {
+    existsInDbRef.current.delete(rid)
+    lastSavedRef.current.delete(rid)
+    lastAuthorRef.current.delete(rid)
+  }
+
+  // Safe to drop from the editor: nothing unsaved and no save in flight.
+  const isClean = (node: any) => {
+    if (!editor) return false
+    const rid = node.attrs.entryId
+    if (!rid || saveInFlightRef.current.has(rid)) return false
+    const edited = recentEditsRef.current.get(rid)
+    if (edited && Date.now() - edited < RECENT_EDIT_MS) return false
+    const html = serializeBlockContent(editor, node)
+    return existsInDbRef.current.has(rid) ? lastSavedRef.current.get(rid) === html : html === '<p></p>'
+  }
+
+  // Keep the window at most MAX_WINDOW entries: drop offscreen, clean entries
+  // from the far end (the side away from where the user is heading), keeping
+  // the scroll position steady when the top end shrinks.
+  const trimWindow = useCallback(
+    (side: 'top' | 'bottom') => {
+      const scroller = scrollRef.current
+      if (!editor || !scroller) return
+      const composerEnd = editor.state.doc.firstChild?.nodeSize ?? 0
+      const entries: { pos: number; node: any }[] = []
+      editor.state.doc.forEach((node: any, pos: number) => {
+        if (pos >= composerEnd && node.attrs.entryId) entries.push({ pos, node })
+      })
+      if (entries.length <= MAX_WINDOW) return
+      const excess = entries.length - (MAX_WINDOW - TRIM_SLACK)
+      const view = scroller.getBoundingClientRect()
+      const selFrom = editor.state.selection.from
+      const drop: { pos: number; node: any }[] = []
+      for (const e of side === 'top' ? entries : [...entries].reverse()) {
+        if (drop.length >= excess) break
+        const rect = (editor.view.nodeDOM(e.pos) as HTMLElement | null)?.getBoundingClientRect()
+        const offscreen = !!rect && (side === 'top' ? rect.bottom < view.top - view.height : rect.top > view.bottom + view.height)
+        const holdsSelection = selFrom >= e.pos && selFrom <= e.pos + e.node.nodeSize
+        // Stop at the first entry that can't go, so the window stays contiguous.
+        if (!offscreen || holdsSelection || !isClean(e.node)) break
+        drop.push(e)
+      }
+      if (!drop.length) return
+      const kept = side === 'top' ? entries[drop.length] : entries[entries.length - 1 - drop.length]
+      const anchor = side === 'top' ? (editor.view.nodeDOM(kept.pos) as HTMLElement | null) : null
+      const before = anchor?.getBoundingClientRect().top ?? 0
+      const lo = Math.min(...drop.map((d) => d.pos))
+      const hi = Math.max(...drop.map((d) => d.pos + d.node.nodeSize))
+      drop.forEach((d) => forget(d.node.attrs.entryId))
+      editor.view.dispatch(editor.state.tr.delete(lo, hi).setMeta('addToHistory', false))
+      if (anchor) scroller.scrollTop += anchor.getBoundingClientRect().top - before
+      if (side === 'top') {
+        newestRidRef.current = kept.node.attrs.entryId
+        hasNewerRef.current = true
+      } else {
+        oldestFullIdRef.current = fullId(kept.node.attrs.entryId)
+        hasMoreRef.current = true
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor]
+  )
+
   const loadOlderPageIntoEditor = useCallback(async () => {
     if (!editor) return
     if (loadingOlderRef.current || !hasMoreRef.current || !oldestFullIdRef.current) return
 
     loadingOlderRef.current = true
-    const page = await loadOlderPage(db, oldestFullIdRef.current, PAGE_SIZE)
+    try {
+      const page = await fetchOlder(db, sourceRef.current, rawId(oldestFullIdRef.current), PAGE_SIZE)
+      if (page.length > 0) {
+        const html = page.map((e: any) => entryToBlockHtml(e, rawId(e._id))).join('')
+        // addToHistory: false — loading isn't an edit (see the initial load).
+        editor
+          .chain()
+          .insertContentAt(editor.state.doc.content.size, html, { updateSelection: false })
+          .command(({ tr }: any) => {
+            tr.setMeta('addToHistory', false)
+            return true
+          })
+          .run()
+        adoptDocs(page)
+        oldestFullIdRef.current = page[page.length - 1]._id
+        hasMoreRef.current = page.length === PAGE_SIZE
+        trimWindow('top')
+      } else {
+        hasMoreRef.current = false
+      }
+    } finally {
+      loadingOlderRef.current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, db])
 
-    if (page.length > 0) {
+  // Newer pages (when the top of the window was trimmed and the user scrolls
+  // back up): inserted under the composer, keeping the view where it was.
+  const loadNewerPageIntoEditor = useCallback(async () => {
+    const scroller = scrollRef.current
+    if (!editor || !scroller || loadingNewerRef.current || !hasNewerRef.current || !newestRidRef.current) return
+    loadingNewerRef.current = true
+    try {
+      const page = await fetchNewer(db, sourceRef.current, newestRidRef.current, PAGE_SIZE)
+      if (!page.length) {
+        hasNewerRef.current = false
+        return
+      }
+      const composerEnd = editor.state.doc.firstChild?.nodeSize ?? 0
+      const anchor = editor.view.nodeDOM(composerEnd) as HTMLElement | null
+      const before = anchor?.getBoundingClientRect().top ?? 0
       const html = page.map((e: any) => entryToBlockHtml(e, rawId(e._id))).join('')
-      // Same addToHistory + re-serialized-baseline fixes as the
-      // initial load above (see that comment for why preventUpdate
-      // isn't used here — it broke ensureLeadingComposer).
       editor
         .chain()
-        .insertContentAt(editor.state.doc.content.size, html, { updateSelection: false })
+        .insertContentAt(composerEnd, html, { updateSelection: false })
         .command(({ tr }: any) => {
           tr.setMeta('addToHistory', false)
           return true
         })
         .run()
-      page.forEach((e: any) => {
-        const rid = rawId(e._id)
-        existsInDbRef.current.add(rid)
-        if (e.updatedByName) lastAuthorRef.current.set(rid, { name: e.updatedByName, color: e.updatedByColor })
-      })
-      page.forEach((e: any) => {
-        const rid = rawId(e._id)
-        const block = findBlock(rid)
-        lastSavedRef.current.set(rid, block ? serializeBlockContent(editor, block.node) : e.content)
-      })
-      oldestFullIdRef.current = page[page.length - 1]._id
-    } else {
-      // Issue 7 fix: anchor was deleted, stop pagination gracefully
-      hasMoreRef.current = false
+      if (anchor) scroller.scrollTop += anchor.getBoundingClientRect().top - before
+      adoptDocs(page)
+      newestRidRef.current = rawId(page[0]._id)
+      hasNewerRef.current = page.length === PAGE_SIZE
+      trimWindow('bottom')
+    } finally {
+      loadingNewerRef.current = false
     }
-    loadingOlderRef.current = false
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, db])
+
+  // Swap the whole window (jumps, filter changes). Pending edits are saved
+  // first; if anything is still unsaved (a failed save) the swap is refused
+  // rather than dropping it.
+  const replaceWindow = useCallback(
+    async (docs: any[], hasNewer: boolean, hasOlder: boolean) => {
+      if (!editor) return false
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      await flushBlocks()
+      // New entries being written right under the composer (never saved,
+      // newest by definition) stay put above the new window.
+      let keepUntil = editor.state.doc.firstChild?.nodeSize ?? 0
+      let leadingNew = true
+      const leaving: string[] = []
+      let dirty = false
+      editor.state.doc.forEach((node: any, pos: number) => {
+        if (pos < keepUntil || !node.attrs.entryId) return
+        if (leadingNew && !existsInDbRef.current.has(node.attrs.entryId)) {
+          keepUntil = pos + node.nodeSize
+          return
+        }
+        leadingNew = false
+        if (!isClean(node)) dirty = true
+        leaving.push(node.attrs.entryId)
+      })
+      if (dirty) return false
+      leaving.forEach(forget)
+      const composerEnd = keepUntil
+      const html = docs.map((e: any) => entryToBlockHtml(e, rawId(e._id))).join('')
+      editor
+        .chain()
+        .command(({ tr }: any) => {
+          tr.delete(composerEnd, tr.doc.content.size)
+          tr.setMeta('addToHistory', false)
+          return true
+        })
+        .run()
+      if (html) {
+        editor
+          .chain()
+          .insertContentAt(editor.state.doc.content.size, html, { updateSelection: false })
+          .command(({ tr }: any) => {
+            tr.setMeta('addToHistory', false)
+            return true
+          })
+          .run()
+      }
+      adoptDocs(docs)
+      newestRidRef.current = docs[0] ? rawId(docs[0]._id) : null
+      hasNewerRef.current = hasNewer
+      oldestFullIdRef.current = docs[docs.length - 1]?._id ?? null
+      hasMoreRef.current = hasOlder
+      return true
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editor, flushBlocks]
+  )
+
+  // Bring an entry into the window (search, quotes, scrubber, days, links):
+  // already loaded, or swap in a window around it.
+  const jumpToEntry = useCallback(
+    async (rid: string) => {
+      if (findBlock(rid)) return true
+      const around = await fetchAround(db, sourceRef.current, rid, WINDOW_NEWER, WINDOW_OLDER)
+      if (!around.docs.length) return false
+      return replaceWindow(around.docs, around.hasNewer, around.hasOlder)
+    },
+    [db, findBlock, replaceWindow]
+  )
 
   // Load older pages when the bottom sentinel scrolls into view — older
   // entries append at the end, which doesn't disturb the current scroll
@@ -527,39 +734,117 @@ export default function Feed({ dbName }: { dbName: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, db, initialLoaded])
 
-  // While any filter is active, the rail's stream/author counts and the
-  // "matches" search count need to reflect the WHOLE drain, not just
-  // whatever happened to be scrolled past — so keep paging in older
-  // entries until there's nothing left, instead of waiting on the sentinel.
-  // ponytail: this loads the entire drain into the editor for as long as a
-  // filter stays active — fine at this app's real per-drain entry counts;
-  // a drain with tens of thousands of entries would need a server-side
-  // count/search instead of "load everything" client-side.
-  const wantWholeDrain = useStore($loadWholeDrain)
-  const needsWholeDrain = isFilterActive(feedFilter) || feedFilter.query.trim().length > 0 || wantWholeDrain
+  // Scrolling back up past a trimmed top: page newer entries back in.
   useEffect(() => {
-    if (!initialLoaded || !needsWholeDrain) return
+    const scroller = scrollRef.current
+    if (!scroller || !initialLoaded) return
+    let frame = 0
+    const onScroll = () => {
+      if (frame) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        if (hasNewerRef.current && scroller.scrollTop < scroller.clientHeight * 1.5) loadNewerPageIntoEditor()
+      })
+    }
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => {
+      scroller.removeEventListener('scroll', onScroll)
+      cancelAnimationFrame(frame)
+    }
+  }, [initialLoaded, loadNewerPageIntoEditor])
+
+  // Every entry id in the drain (ids only), for the scrubber, the day
+  // outline and filters. Kept current by the live-changes handler.
+  const [indexReady, setIndexReady] = useState(false)
+  useEffect(() => {
+    let alive = true
+    setIndexReady(false)
+    db.allDocs({ startkey: 'entry:\uffff', endkey: 'entry:', descending: true })
+      .then((res) => {
+        if (!alive) return
+        $entryIndex.set(res.rows.map((r) => r.id.slice(entryPrefix.length)))
+        setIndexReady(true)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db])
+
+  // What the feed pages through: every entry, or just a stream's / the
+  // search's matches. Filtered views never load the whole drain; they page
+  // through the matching ids like any other window.
+  const filterKey = `${[...feedFilter.streams].sort().join(',')}|${feedFilter.onlyMatches ? feedFilter.query.trim() : ''}`
+  const computeSource = useCallback(async (): Promise<EntrySource> => {
+    const query = feedFilter.onlyMatches ? feedFilter.query.trim() : ''
+    if (feedFilter.streams.size === 0 && !query) return { kind: 'all' }
+    let ids = $entryIndex.get()
+    if (feedFilter.streams.size) {
+      const live = new Set($streams.get().map(slugOfStream))
+      const links = $streamLinks.get()
+      const f = { ...EMPTY_FILTER, streams: feedFilter.streams }
+      ids = ids.filter((id) => isEntryVisible({}, links.get(id), live, f))
+    }
+    if (query) {
+      const matches = new Set(await matchingIds(dbName, parseQuery(query)))
+      ids = ids.filter((id) => matches.has(id))
+    }
+    return { kind: 'ids', ids }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey, dbName])
+
+  // Filter changed: rebuild the window from the new source, from the top.
+  const appliedFilterRef = useRef('|')
+  useEffect(() => {
+    if (!editor || !initialLoaded || !indexReady) return
+    if (appliedFilterRef.current === filterKey) return
     let cancelled = false
     ;(async () => {
-      while (!cancelled && hasMoreRef.current) {
-        // The scroll sentinel may be mid-load. loadOlderPageIntoEditor then
-        // returns at once, and awaiting that in a tight loop never yields
-        // to the event loop — the in-flight load can't finish and the tab
-        // pins a CPU core. Wait for it instead.
-        if (loadingOlderRef.current) {
-          await new Promise((r) => setTimeout(r, 50))
-          continue
-        }
-        // Nothing to page from yet: loadOlderPageIntoEditor would return at
-        // once too, so stop rather than spin.
-        if (!oldestFullIdRef.current) break
-        await loadOlderPageIntoEditor()
-      }
+      const source = await computeSource()
+      if (cancelled) return
+      appliedFilterRef.current = filterKey
+      sourceRef.current = source
+      $sourceIds.set(source.kind === 'ids' ? source.ids : null)
+      const docs = await fetchLatest(db, source, INITIAL_PAGE_SIZE)
+      if (cancelled) return
+      if (await replaceWindow(docs, false, docs.length === INITIAL_PAGE_SIZE)) scrollRef.current?.scrollTo({ top: 0 })
     })()
     return () => {
       cancelled = true
     }
-  }, [initialLoaded, needsWholeDrain, loadOlderPageIntoEditor])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey, editor, initialLoaded, indexReady])
+
+  // While filtered, keep the matching ids current as entries are filed or
+  // created (no window reload; paging just follows the updated list).
+  useEffect(() => {
+    if (sourceRef.current.kind !== 'ids' || (feedFilter.onlyMatches && feedFilter.query.trim())) return
+    computeSource().then((source) => {
+      if (appliedFilterRef.current !== filterKey) return
+      sourceRef.current = source
+      $sourceIds.set(source.kind === 'ids' ? source.ids : null)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streamLinks, streams])
+
+  // Starting a new entry while scrolled into older history: bring the
+  // window back to the newest entries first, so the new one lands in order.
+  useEffect(() => {
+    if (!editor) return
+    const onSelection = () => {
+      if (!hasNewerRef.current) return
+      const first = editor.state.doc.firstChild
+      if (!first || editor.state.selection.from > first.nodeSize) return
+      fetchLatest(db, sourceRef.current, INITIAL_PAGE_SIZE).then((docs) =>
+        replaceWindow(docs, false, docs.length === INITIAL_PAGE_SIZE)
+      )
+    }
+    editor.on('selectionUpdate', onSelection)
+    return () => {
+      editor.off('selectionUpdate', onSelection)
+    }
+  }, [editor, db, replaceWindow])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -594,6 +879,22 @@ export default function Feed({ dbName }: { dbName: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summarizeRequest, editor])
 
+  // Plain jumps (scrubber, day outline, quotes): bring the entry into the
+  // window and scroll to it, without the search highlight.
+  const jumpRequest = useStore($jumpTo)
+  useEffect(() => {
+    if (!jumpRequest || !editor || !initialLoaded) return
+    $jumpTo.set(null)
+    jumpToEntry(jumpRequest.entryId).then(() =>
+      requestAnimationFrame(() =>
+        editor.view.dom
+          .querySelector(`p[data-entry-id="${jumpRequest.entryId}"]`)
+          ?.scrollIntoView({ block: jumpRequest.block, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
+      )
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jumpRequest, editor, initialLoaded])
+
   // Search: highlight the query's words (while stepping through picked
   // results, or while "only matches" filters the feed) and bring the
   // current result into view — paging older entries in if it isn't loaded
@@ -607,9 +908,14 @@ export default function Feed({ dbName }: { dbName: string }) {
 
     let cancelled = false
     ;(async () => {
-      while (!cancelled && !findBlock(target) && hasMoreRef.current) await loadOlderPageIntoEditor()
+      await jumpToEntry(target)
       if (cancelled) return
-      if (hiddenIdsRef.current.has(target)) $feedFilter.set({ ...EMPTY_FILTER })
+      // Not part of the filtered view: leave the filter, which rebuilds the
+      // window from every entry; this effect then runs again.
+      if (!findBlock(target) || hiddenIdsRef.current.has(target)) {
+        if (isFilterActive($feedFilter.get())) $feedFilter.set({ ...EMPTY_FILTER })
+        return
+      }
       // A frame for the un-hide to render before measuring the scroll.
       requestAnimationFrame(() =>
         editor.view.dom
@@ -631,6 +937,22 @@ export default function Feed({ dbName }: { dbName: string }) {
     if (!editor) return
     activeEntriesChanges?.cancel()
     const since = sinceSeqRef.current ?? 'now'
+    // Index updates are batched per frame: the first sync of a big drain
+    // streams thousands of changes, and one store update (plus an O(n) copy)
+    // per change re-renders every subscriber thousands of times.
+    const indexPending = new Map<string, boolean>()
+    let indexFrame = 0
+    const queueIndex = (rid: string, present: boolean) => {
+      indexPending.set(rid, present)
+      if (indexFrame) return
+      indexFrame = requestAnimationFrame(() => {
+        indexFrame = 0
+        let ids = $entryIndex.get()
+        for (const [id, has] of indexPending) ids = has ? withId(ids, id) : withoutId(ids, id)
+        indexPending.clear()
+        $entryIndex.set(ids)
+      })
+    }
     const changes = db
       .changes({ since, live: true, include_docs: true, conflicts: true })
       .on('change', async (change: any) => {
@@ -648,6 +970,7 @@ export default function Feed({ dbName }: { dbName: string }) {
         try {
           if (change.deleted) {
             notifyEntryChanged(dbName, rid, null)
+            queueIndex(rid, false)
             const block = findBlock(rid)
             if (block) editor.commands.deleteRange({ from: block.pos, to: block.pos + block.node.nodeSize })
             existsInDbRef.current.delete(rid)
@@ -663,6 +986,18 @@ export default function Feed({ dbName }: { dbName: string }) {
           }
           // Quotes of this entry anywhere on screen follow the change.
           notifyEntryChanged(dbName, rid, doc)
+          queueIndex(rid, true)
+
+          // Not in the editor and outside the window's newer end (trimmed
+          // away above), or not part of the filtered view: nothing to patch.
+          // Paging will bring it in. Must return before the bookkeeping
+          // below marks it as existing, or flushBlocks would delete it.
+          if (!findBlock(rid)) {
+            const src = sourceRef.current
+            const aboveWindow = hasNewerRef.current && !!newestRidRef.current && rid > newestRidRef.current
+            const notInView = src.kind === 'ids' && src.ids[positionOf(src.ids, rid)] !== rid
+            if (aboveWindow || notInView) return
+          }
 
           // Issue 4 fix: always update authorship ref — even if content matches
           // (remote author could have changed the same text we wrote).
@@ -728,7 +1063,13 @@ export default function Feed({ dbName }: { dbName: string }) {
               // Older than everything loaded. If older pages remain,
               // pagination will bring it in — inserting now would duplicate
               // it then, and leaving it in existsInDbRef without a block
-              // would make flushBlocks delete it as "removed".
+              // would make flushBlocks delete it as "removed". A full window
+              // (first sync streaming a big drain in) counts as having more.
+              const last = editor.state.doc.lastChild?.attrs.entryId
+              if (!hasMoreRef.current && last && editor.state.doc.childCount > MAX_WINDOW) {
+                hasMoreRef.current = true
+                oldestFullIdRef.current = fullId(last)
+              }
               if (hasMoreRef.current) {
                 existsInDbRef.current.delete(rid)
                 lastSavedRef.current.delete(rid)
@@ -751,6 +1092,9 @@ export default function Feed({ dbName }: { dbName: string }) {
               })
               .run()
             if (shouldScroll) scrollToTop()
+            // Arrivals inside the window (first sync streams in out of
+            // order) still have to respect its size.
+            trimWindow('bottom')
           }
 
           // Overwrites the raw-content baseline set above (line ~485) with
@@ -772,6 +1116,7 @@ export default function Feed({ dbName }: { dbName: string }) {
       })
     activeEntriesChanges = changes
     return () => {
+      cancelAnimationFrame(indexFrame)
       changes.cancel()
       if (activeEntriesChanges === changes) activeEntriesChanges = null
     }
@@ -1022,7 +1367,6 @@ export default function Feed({ dbName }: { dbName: string }) {
             <OutlineAside
               editor={editor}
               dbName={dbName}
-              hiddenEntryIds={hiddenIds}
               summarizingKey={summarizingKey}
               onSummarize={handleSummarize}
             />
@@ -1031,7 +1375,7 @@ export default function Feed({ dbName }: { dbName: string }) {
             (EntryBlockView), and a scroll box clips anything outside it. On
             phones only the cards in a summary thread indent for it instead,
             so every other entry gets the full width. */}
-        <div ref={scrollRef} data-feed-scroller className="feed-scroll h-full min-w-0 flex-1 overflow-y-auto pt-24 pr-2 pb-16 lg:pl-3 lg:pt-16 [@media(pointer:fine)]:pr-9">
+        <div ref={scrollRef} data-feed-scroller className="feed-scroll h-full min-w-0 flex-1 overflow-y-auto [overflow-anchor:none] pt-24 pr-2 pb-16 lg:pl-3 lg:pt-16 [@media(pointer:fine)]:pr-9">
           <div className="flex gap-4">
             <div ref={editorColumnRef} className="min-w-0 flex-1">
               {summarizeError && (

@@ -108,3 +108,26 @@ export function collectDays(doc: { forEach: (fn: (node: any) => void) => void },
   })
   return [...byDay.values()]
 }
+
+// Days from entry ids alone (newest first). ULIDs carry their creation
+// time, so the whole drain's day outline needs no entry content — the
+// editor only holds a window of entries.
+export function daysFromIds(ids: string[]): DayGroup[] {
+  const days: DayGroup[] = []
+  let current = null as DayGroup | null
+  for (const id of ids) {
+    let ts: number
+    try {
+      ts = decodeTime(id.slice(0, 26))
+    } catch {
+      continue
+    }
+    const key = new Date(ts).toDateString()
+    if (current?.key !== key) {
+      current = { key, label: dayLabel(ts), entryId: id, entryIds: [] }
+      days.push(current)
+    }
+    current.entryIds.push(id)
+  }
+  return days
+}

@@ -1,4 +1,4 @@
-import { useEffect, useState, memo } from 'react'
+import { useMemo, useState, memo } from 'react'
 import type { Editor } from '@tiptap/react'
 import { useStore } from '@nanostores/react'
 import { Sparkles, Loader2, Plus, MoreHorizontal, Pencil, Trash2, Inbox, Layers } from 'lucide-react'
@@ -15,8 +15,8 @@ import {
 import { $streams, $streamLinks, $feedFilter } from '@/stores/streams'
 import { UNSORTED, countByStream, selectStream } from './feedFilter'
 import { StreamCreator } from './StreamCreator'
-import { collectDays, goToAllEntries, type DayGroup } from './utils'
-import { onlyEntryTextChanged } from './docDiff'
+import { daysFromIds, goToAllEntries } from './utils'
+import { $entryIndex, $sourceIds, $jumpTo } from '@/stores/feed'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -90,13 +90,11 @@ function ChannelRow({
 export const OutlineAside = memo(function OutlineAside({
   editor,
   dbName,
-  hiddenEntryIds,
   summarizingKey,
   onSummarize,
 }: {
   editor: Editor
   dbName: string
-  hiddenEntryIds: Set<string>
   summarizingKey: string | null
   onSummarize: (key: string, entryIds: string[]) => void
 }) {
@@ -105,7 +103,6 @@ export const OutlineAside = memo(function OutlineAside({
   const streamLinks = useStore($streamLinks)
   const filter = useStore($feedFilter)
 
-  const [days, setDays] = useState<DayGroup[]>([])
   const [creating, setCreating] = useState(false)
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
@@ -113,19 +110,11 @@ export const OutlineAside = memo(function OutlineAside({
     null
   )
 
-  useEffect(() => {
-    const recompute = () => setDays(collectDays(editor.state.doc, hiddenEntryIds))
-    // Days only change when entries are added, removed or re-dated.
-    const onUpdate = ({ transaction }: { transaction: any }) => {
-      if (!onlyEntryTextChanged(transaction.before, transaction.doc)) recompute()
-    }
-
-    recompute()
-    editor.on('update', onUpdate)
-    return () => {
-      editor.off('update', onUpdate)
-    }
-  }, [editor, hiddenEntryIds])
+  // Every day in the drain (or the open stream / search), from the id index
+  // — the editor only holds a window of entries.
+  const allIds = useStore($entryIndex)
+  const sourceIds = useStore($sourceIds)
+  const days = useMemo(() => daysFromIds(sourceIds ?? allIds), [sourceIds, allIds])
 
   // Counted from the drain-wide link index, not the loaded page, so a
   // stream's count is right before its older entries are scrolled in.
@@ -162,12 +151,7 @@ export const OutlineAside = memo(function OutlineAside({
     setDeleted(null)
   }
 
-  const jumpTo = (entryId: string) => {
-    editor.view.dom.querySelector(`p[data-entry-id="${entryId}"]`)?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center',
-    })
-  }
+  const jumpTo = (entryId: string) => $jumpTo.set({ entryId, block: 'start' })
 
   return (
     // A fixed column beside the feed's scroller (Feed/index.tsx), not inside
