@@ -1,6 +1,6 @@
 import type { APIRoute } from 'astro'
 import { requireAuth } from '@/lib/requireAuth'
-import { getDirectoryDrains, updateUserEntryAsAuthor, deleteUserEntryAsAuthor, stripEntryPrefix } from '@/lib/couchdb-admin'
+import { getDirectoryDrains, updateUserEntryAsAuthor, deleteUserEntryAsAuthor, stripEntryPrefix, getAdminDoc } from '@/lib/couchdb-admin'
 import { renderAgentContent } from '@/lib/agentContent'
 import { deriveIdentity } from '@/services/identity'
 
@@ -21,6 +21,20 @@ async function requireMember(request: Request, dbName: string) {
 // version of this same rule (it explicitly exempts _admin), so without
 // this check an API token would end up more powerful than a real signed-in
 // user, not at parity with one.
+// GET — one entry, for quotes of entries this device hasn't synced (another
+// drain). Members only, same check as the rest of the entries API.
+export const GET: APIRoute = async ({ request, params }) => {
+  const dbName = params.dbName!
+  const { error } = await requireMember(request, dbName)
+  if (error) return error
+  const doc = await getAdminDoc(dbName, `entry:${params.entryId}`)
+  if (!doc || doc.type !== 'entry') return new Response(JSON.stringify({ error: 'Not found' }), { status: 404 })
+  return new Response(JSON.stringify({ entry: stripEntryPrefix(doc) }), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json', 'Cache-Control': 'private, max-age=60' },
+  })
+}
+
 export const PATCH: APIRoute = async ({ request, params }) => {
   const dbName = params.dbName!
   const entryId = params.entryId!

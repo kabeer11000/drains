@@ -44,6 +44,8 @@ import { createStreamSuggestion } from './StreamSuggestion'
 import { onlyEntryTextChanged } from './docDiff'
 import { Embed } from './EmbedExtension'
 import { AiTarget } from './AiTarget'
+import { Quote } from './QuoteExtension'
+import { notifyEntryChanged } from '@/services/quotes'
 import { safeName, safeColor, handleChannelShortcut, collectDays } from './utils'
 import { $comments, $summarizeDayOf, $loadWholeDrain } from '@/stores/feed'
 import { $sync } from '@/stores/sync'
@@ -208,6 +210,7 @@ export default function Feed({ dbName }: { dbName: string }) {
       ReferenceExtension,
       Embed,
       AiTarget,
+      Quote,
     ],
     content: '',
     onUpdate: () => scheduleSave(),
@@ -644,6 +647,7 @@ export default function Feed({ dbName }: { dbName: string }) {
 
         try {
           if (change.deleted) {
+            notifyEntryChanged(dbName, rid, null)
             const block = findBlock(rid)
             if (block) editor.commands.deleteRange({ from: block.pos, to: block.pos + block.node.nodeSize })
             existsInDbRef.current.delete(rid)
@@ -657,6 +661,8 @@ export default function Feed({ dbName }: { dbName: string }) {
           if (doc._conflicts?.length) {
             doc = await resolveConflicts(db, change.id)
           }
+          // Quotes of this entry anywhere on screen follow the change.
+          notifyEntryChanged(dbName, rid, doc)
 
           // Issue 4 fix: always update authorship ref — even if content matches
           // (remote author could have changed the same text we wrote).

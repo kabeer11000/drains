@@ -1,9 +1,10 @@
 import { NodeViewWrapper, NodeViewContent, type NodeViewProps } from '@tiptap/react'
 import { useStore } from '@nanostores/react'
-import { GitCommit, Sparkles, Bot, Trash2, MoreHorizontal } from 'lucide-react'
+import { GitCommit, Sparkles, Bot, Trash2, MoreHorizontal, Quote } from 'lucide-react'
 import { LazyPopover } from '@/components/ui/lazy-popover'
 import { Button } from '@/components/ui/button'
-import { $streams, $streamLinks, $feedFilter } from '@/stores/streams'
+import { $streams, $streamLinks, $feedFilter, $activeDrain } from '@/stores/streams'
+import { excerptOf } from './QuoteExtension'
 import { useStoreSelector, sameItems } from '@/hooks/use-store-selector'
 import type { CommentDoc } from '@/services/comments'
 import { relativeTime, safeName, safeColor } from './utils'
@@ -14,7 +15,25 @@ import { $comments, $summarizeDayOf } from '@/stores/feed'
 
 const NO_COMMENTS: CommentDoc[] = []
 
-export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
+// Drops a quote of this entry into the composer (top of the feed) and puts
+// the caret after it, ready to write a reply.
+function quoteInComposer(editor: NodeViewProps['editor'], entryId: string, text: string) {
+  const composer = editor.state.doc.firstChild
+  const dbName = $activeDrain.get()?.dbName
+  if (!composer?.attrs.isComposer || !dbName || !entryId) return
+  const end = composer.nodeSize - 1
+  editor
+    .chain()
+    .insertContentAt(end, [
+      { type: 'quote', attrs: { dbName, entryIdRef: entryId, excerpt: excerptOf(text) } },
+      { type: 'text', text: ' ' },
+    ])
+    .focus(end + 2)
+    .run()
+  editor.view.dom.closest('[data-feed-scroller]')?.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+export function EntryBlockView({ node, deleteNode, editor }: NodeViewProps) {
   const { entryId, authorColor, authorName, updatedAt, createdAt, createdByName, source, viaToken } = node.attrs
   // Stream renames/recolours are rare, so every card may follow $streams.
   // Links, comments and the filter change often: each card subscribes to
@@ -228,6 +247,18 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
                 ))}
               </div>
             </div>
+          )}
+          {!isSummary && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3 w-full"
+              onClick={() => quoteInComposer(editor, entryId, node.textContent)}
+            >
+              <Quote className="size-3.5" />
+              Quote in a new entry
+            </Button>
           )}
           {!isSummary && createdAt && (
             <Button
