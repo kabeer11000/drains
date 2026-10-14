@@ -33,7 +33,7 @@ export interface BlockIdentity {
 // PouchDB doc. Splitting a block (Enter) produces a new paragraph with no
 // entryId — this plugin notices on the very next transaction and assigns
 // one, tagged with whoever is currently typing.
-export const AssignBlockId = Extension.create<{ getIdentity: () => BlockIdentity }>({
+export const AssignBlockId = Extension.create<{ getIdentity: () => BlockIdentity | null }>({
   name: 'assignBlockId',
 
   addOptions() {
@@ -51,8 +51,14 @@ export const AssignBlockId = Extension.create<{ getIdentity: () => BlockIdentity
           // nothing to assign, so skip sorting every id in the drain.
           if (onlyEntryTextChanged(transactions[0].before, newState.doc)) return null
 
-          let tr: ReturnType<typeof newState.tr> | null = null
+          // Before the signed-in identity has loaded (first render of a drain
+          // can beat it), there's nobody to attribute a new block to. Skip;
+          // the next change after it loads assigns the ids. (Reading
+          // identity.color off null here crashed the editor on load.)
           const identity = getIdentity()
+          if (!identity) return null
+
+          let tr: ReturnType<typeof newState.tr> | null = null
           const seen = new Set<string>()
           const duplicateCount = new Map<string, number>()
 

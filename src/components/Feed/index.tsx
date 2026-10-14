@@ -985,6 +985,11 @@ export default function Feed({ dbName }: { dbName: string }) {
     }
   }, [editor, dbName])
 
+  // Same skeleton before the first page loads and during a drain's first sync
+  // to this device (until an entry arrives or sync settles), so the page
+  // never switches between two loading looks.
+  const showSkeleton = !initialLoaded || (firstSync && !hasEntries)
+
   if (!identity) return null
 
   return (
@@ -1042,8 +1047,8 @@ export default function Feed({ dbName }: { dbName: string }) {
               {initialLoaded && isFilterActive(feedFilter) && (
                 <ChannelHeader count={visibleCount} loadingMore={hasMoreRef.current} />
               )}
-              {!initialLoaded && (
-                <div className="flex flex-col gap-1.5">
+              {showSkeleton && (
+                <div className="flex flex-col gap-1.5" aria-busy="true" aria-label="Loading entries">
                   {SKELETON_ENTRY_WIDTHS.map((width, i) => (
                     <div key={i} className="rounded-lg border border-border bg-card p-2.5">
                       <Skeleton className={`h-4 ${width}`} />
@@ -1051,19 +1056,9 @@ export default function Feed({ dbName }: { dbName: string }) {
                   ))}
                 </div>
               )}
-              <div className={initialLoaded ? 'min-h-full' : 'hidden'} onClick={handleContainerClick}>
+              <div className={showSkeleton ? 'hidden' : 'min-h-full'} onClick={handleContainerClick}>
                 <EditorContent editor={editor} />
               </div>
-              {initialLoaded && firstSync && !hasEntries && (
-                <div className="flex flex-col gap-1.5" aria-live="polite">
-                  <p className="px-1 pt-1 text-xs text-muted-foreground">Syncing this drain to your device…</p>
-                  {SKELETON_ENTRY_WIDTHS.map((width, i) => (
-                    <div key={i} className="rounded-lg border border-border bg-card p-2.5">
-                      <Skeleton className={`h-4 ${width}`} />
-                    </div>
-                  ))}
-                </div>
-              )}
               <div ref={sentinelRef} />
             </div>
             {editor && <CommentsAside editor={editor} comments={comments} onDelete={handleDeleteComment} />}
