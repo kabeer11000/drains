@@ -1,5 +1,6 @@
 import { useStore } from '@nanostores/react'
-import { ChevronRight, Globe, Lock, Search } from 'lucide-react'
+import { ChevronRight, Globe, Lock, Search, Sparkles } from 'lucide-react'
+import { useWhatsNew } from '@/hooks/use-whats-new'
 import { $drains } from '@/helpers/drains'
 import { $identity } from '@/services/identity'
 import { $commandPaletteOpen, isMac } from './CommandPalette'
@@ -15,6 +16,7 @@ export default function HomeStart() {
   const drains = useStore($drains)
   const identity = useStore($identity)
   const firstName = identity?.name?.split(/\s+/)[0]
+  const whatsNew = useWhatsNew()
 
   return (
     <div className="flex flex-1 items-center justify-center overflow-y-auto px-6 py-16">
@@ -33,6 +35,26 @@ export default function HomeStart() {
           <span className="flex-1 text-left">Search all drains…</span>
           <kbd className="rounded border border-border/60 px-1.5 font-sans text-[11px]">{isMac ? '⌘K' : 'Ctrl K'}</kbd>
         </button>
+
+        {whatsNew.info && (
+          <a
+            href={whatsNew.info.url}
+            onClick={whatsNew.markSeen}
+            className="group flex items-start gap-3 rounded-xl border px-4 py-3 outline-none transition-colors hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Sparkles className="mt-0.5 size-4 shrink-0 text-violet-500" />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-2 text-sm font-medium">
+                What's new
+                {whatsNew.unread && <span className="size-1.5 rounded-full bg-violet-500" />}
+              </span>
+              {whatsNew.info.snippet && (
+                <span className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{whatsNew.info.snippet}</span>
+              )}
+            </span>
+            <ChevronRight className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
+          </a>
+        )}
 
         {drains.length > 0 ? (
           <div>

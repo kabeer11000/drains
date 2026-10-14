@@ -25,7 +25,8 @@ import { $identity, updateDisplayName } from '@/services/identity'
 import { logout } from '@/services/authSession'
 import { getStoredTheme, setTheme, watchSystemTheme, type Theme } from '@/services/theme'
 import { $aiUsage, fetchAiUsage } from '@/services/aiApi'
-import { History, KeyRound, LogOut, Pencil } from 'lucide-react'
+import { History, KeyRound, LogOut, Pencil, Sparkles } from 'lucide-react'
+import { useWhatsNew } from '@/hooks/use-whats-new'
 
 function ChangeNameDialog({
   open,
@@ -101,6 +102,7 @@ export default function UserMenu({
   onOpenTrash: () => void
 }) {
   const identity = useStore($identity)
+  const whatsNew = useWhatsNew()
   const aiUsage = useStore($aiUsage)
   const [theme, setThemeState] = useState<Theme>('system')
   const [changeNameOpen, setChangeNameOpen] = useState(false)
@@ -131,11 +133,14 @@ export default function UserMenu({
             type="button"
             title={identity.name || identity.email}
             style={{ background: identity.color }}
-            className="m-0 flex size-8 shrink-0 items-center justify-center rounded-full p-0 text-xs font-medium text-white outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            className="relative m-0 flex size-8 shrink-0 items-center justify-center rounded-full p-0 text-xs font-medium text-white outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
           />
         }
       >
         {identity.name?.[0]?.toUpperCase() || identity.email[0]?.toUpperCase()}
+        {whatsNew.unread && (
+          <span className="absolute -top-0.5 -right-0.5 size-2.5 rounded-full border-2 border-background bg-violet-500" />
+        )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuGroup>
@@ -186,6 +191,18 @@ export default function UserMenu({
           <History className="size-3.5" />
           Recently deleted
         </DropdownMenuItem>
+        {whatsNew.info && (
+          <DropdownMenuItem
+            onClick={() => {
+              whatsNew.markSeen()
+              window.location.href = whatsNew.info!.url
+            }}
+          >
+            <Sparkles className="size-3.5" />
+            What's new
+            {whatsNew.unread && <span className="ml-auto size-1.5 rounded-full bg-violet-500" />}
+          </DropdownMenuItem>
+        )}
         {/* temp: Feedback menu item hidden — Sleekplan's widget provides its
             own trigger UI now; restore this (and a Sleekplan open call) if
             a menu entry point is wanted later.
