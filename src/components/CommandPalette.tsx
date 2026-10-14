@@ -137,8 +137,25 @@ function isDoneHtml(html: string) {
 // One read of a drain's local PouchDB: entries plus its streams and links,
 // so #stream / @person / from: / is:done work in any drain, not only the
 // one on screen. Local-first: only drains synced to this device are there.
+// Reused across opens until the drain's local DB changes (update_seq): every
+// open used to re-read and DOM-parse every entry of every drain.
+const indexCache = new Map<string, { seq: string | number; index: DrainIndex }>()
+
 async function indexDrain(dbName: string, title: string): Promise<DrainIndex> {
-  const res = await getDrainDb(dbName)
+  const db = getDrainDb(dbName)
+  const seq = await db
+    .info()
+    .then((i) => i.update_seq)
+    .catch(() => null)
+  const cached = indexCache.get(dbName)
+  if (seq !== null && cached && cached.seq === seq) return { ...cached.index, title }
+  const index = await buildIndex(db, dbName, title)
+  if (seq !== null) indexCache.set(dbName, { seq, index })
+  return index
+}
+
+async function buildIndex(db: PouchDB.Database, dbName: string, title: string): Promise<DrainIndex> {
+  const res = await db
     .allDocs({ include_docs: true })
     .catch(() => ({ rows: [] as any[] }))
   const docs = res.rows.map((r: any) => r.doc).filter(Boolean)

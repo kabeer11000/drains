@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { isConstrained } from '@/services/perf'
 import { NodeViewWrapper, type NodeViewProps } from '@tiptap/react'
 import { ExternalLink, X } from 'lucide-react'
 import { authHeader } from '@/services/apiAuth'
@@ -32,15 +33,32 @@ function hostOf(url: string) {
 export function EmbedView({ node, selected, deleteNode, editor }: NodeViewProps) {
   const embed = parseEmbed(String(node.attrs.url ?? ''))
   const [preview, setPreview] = useState<LinkPreview | null | undefined>(undefined)
+  const cardRef = useRef<HTMLAnchorElement>(null)
+  const [nearView, setNearView] = useState(false)
+
+  // Fetch the preview only once the card is about to scroll into view, and
+  // not at all on constrained devices/connections (the plain link remains).
+  useEffect(() => {
+    const el = cardRef.current
+    if (!el || nearView || isConstrained()) return
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) setNearView(true)
+      },
+      { rootMargin: '300px' }
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [nearView])
 
   useEffect(() => {
-    if (!embed || embed.src) return
+    if (!embed || embed.src || !nearView) return
     let alive = true
     loadPreview(embed.url).then((p) => alive && setPreview(p))
     return () => {
       alive = false
     }
-  }, [embed?.url, embed?.src])
+  }, [embed?.url, embed?.src, nearView])
 
   if (!embed) return <NodeViewWrapper as="span" />
 
@@ -82,6 +100,7 @@ export function EmbedView({ node, selected, deleteNode, editor }: NodeViewProps)
     <NodeViewWrapper as="span" className={frame} contentEditable={false}>
       {remove}
       <a
+        ref={cardRef}
         href={embed.url}
         target="_blank"
         rel="noopener noreferrer nofollow"
@@ -93,7 +112,7 @@ export function EmbedView({ node, selected, deleteNode, editor }: NodeViewProps)
             <span className="truncate">{preview?.siteName ?? hostOf(embed.url)}</span>
           </span>
           <span className="line-clamp-2 text-sm font-medium text-foreground">
-            {preview === undefined ? embed.url : (preview?.title ?? embed.url)}
+            {preview?.title ?? embed.url}
           </span>
           {preview?.description && (
             <span className="line-clamp-2 text-xs text-muted-foreground">{preview.description}</span>

@@ -1,6 +1,7 @@
 import { getDrainDb } from './db.js';
 import { patchSyncState, syncStateOf } from '../stores/sync';
 import { getAuthCredential } from './authSession';
+import { isConstrained } from './perf';
 
 // VITE_COUCHDB_URL is a build-time value baked into this client bundle —
 // deliberately no fallback here. A silent default to localhost would mean
@@ -24,8 +25,26 @@ function classify(err) {
   return { status: 'error', problem: 'unknown' };
 }
 
+// One-shot push of anything still local, used when a drain stops syncing
+// live, so nothing written there is left only on this device.
+function flushDrain(dbName) {
+  const credential = getAuthCredential();
+  if (!REMOTE_HOST || !credential) return;
+  getDrainDb(dbName)
+    .replicate.to(`${REMOTE_HOST}/${dbName}`, { auth: { username: credential.email, password: credential.password } })
+    .catch((err) => console.warn('final push failed', dbName, err));
+}
+
 export function startDrainSync(dbName) {
   if (handlers.has(dbName)) return handlers.get(dbName);
+  // Only the drain on screen syncs live. Every drain visited used to keep a
+  // live replication (long-poll connection + change feeds) for the whole
+  // session; now the previous one is stopped after a final push.
+  for (const [other, handler] of handlers) {
+    handler.cancel();
+    handlers.delete(other);
+    flushDrain(other);
+  }
   if (!REMOTE_HOST) {
     console.error('VITE_COUCHDB_URL is not set — this client bundle has no sync target.');
     patchSyncState(dbName, { status: 'error', problem: 'unknown' });
@@ -39,6 +58,11 @@ export function startDrainSync(dbName) {
       live: true,
       retry: true,
       auth: { username: credential.email, password: credential.password },
+      // Constrained devices/connections: check in less often and back off
+      // further after failures, instead of hammering a slow link.
+      ...(isConstrained()
+        ? { heartbeat: 30000, back_off_function: (delay) => (delay === 0 ? 3000 : Math.min(delay * 2, 120000)) }
+        : {}),
     })
     // 'paused' without an error means caught up and waiting for changes.
     .on('paused', (err) => {
