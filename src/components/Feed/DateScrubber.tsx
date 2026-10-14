@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/react'
 import { decodeTime } from 'ulid'
 import { ChevronsUpDown } from 'lucide-react'
@@ -128,8 +128,14 @@ export function DateScrubber({ editor }: { editor: Editor }) {
     const scroller = scrollerRef.current
     if (!scroller) return
     let idle: ReturnType<typeof setTimeout> | undefined
+    let frame = 0
+    // Scroll events can fire several times per frame; render at most once.
     const onScroll = () => {
-      setScrollTop(scroller.scrollTop)
+      if (!frame)
+        frame = requestAnimationFrame(() => {
+          frame = 0
+          setScrollTop(scroller.scrollTop)
+        })
       setRecent(true)
       clearTimeout(idle)
       idle = setTimeout(() => setRecent(false), IDLE_MS)
@@ -137,6 +143,7 @@ export function DateScrubber({ editor }: { editor: Editor }) {
     scroller.addEventListener('scroll', onScroll, { passive: true })
     return () => {
       scroller.removeEventListener('scroll', onScroll)
+      cancelAnimationFrame(frame)
       clearTimeout(idle)
     }
   }, [layout.contentH > 0])
@@ -151,6 +158,9 @@ export function DateScrubber({ editor }: { editor: Editor }) {
 
   const { contentH, viewH, tops, times } = layout
   const scrollable = contentH - viewH
+  // Before the early return: hooks must run in the same order every render.
+  const visibleTicks = useMemo(() => thinTicks(layout.ticks, contentH, railH), [layout.ticks, contentH, railH])
+
   // Nothing to scrub through.
   if (times.length < 2 || scrollable <= 4) return null
 
@@ -224,7 +234,6 @@ export function DateScrubber({ editor }: { editor: Editor }) {
   // While dragging/scrolling the bubble rides the thumb; on hover it follows the pointer.
   const bubbleY = dragging || (recent && hoverY === null) ? thumbTop + thumbH / 2 : hoverY
   const bubbleTime = bubbleY === null ? null : dragging || hoverY === null ? (times[itemAt(tops, scrollTop + 4)] ?? times[0]) : dateAtRail(bubbleY)
-  const visibleTicks = thinTicks(layout.ticks, contentH, railH)
 
   const ticks = (
     <div className={`pointer-events-none absolute inset-0 transition-opacity duration-150 ${showTicks ? 'opacity-100' : 'opacity-0'}`}>
