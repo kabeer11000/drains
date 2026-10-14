@@ -25,7 +25,9 @@ export const POST: APIRoute = async ({ request, params }) => {
   }
   const entryIds = rawIds.map((id: string) => `entry:${id}`)
 
-  const entries = await getEntriesByIds(dbName, entryIds)
+  // Day ids come from the id index, which can't tell an earlier AI summary
+  // from a real entry; never summarize a summary.
+  const entries = (await getEntriesByIds(dbName, entryIds)).filter((e: any) => e.source !== 'ai-summary')
   if (entries.length === 0) {
     return new Response(JSON.stringify({ error: 'None of those entries exist' }), { status: 404 })
   }
