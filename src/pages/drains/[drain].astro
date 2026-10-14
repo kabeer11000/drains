@@ -1,6 +1,6 @@
 ---
 import Feed from "@/components/Feed";
-import PageShell from "@/components/PageShell";
+import AppShell from "@/components/AppShell.astro";
 import SyncIndicator from "@/components/SyncIndicator";
 import DrainTitleChip from "@/components/DrainTitleChip";
 import Layout from "@/layouts/Layout.astro";
@@ -27,7 +27,7 @@ if (access !== 'ok') Astro.response.status = 404;
 ---
 
 <Layout noindex>
-	<PageShell client:load>
+	<AppShell>
 		{access === 'ok' ? (
 			<div class="relative mx-auto flex h-full min-h-0 w-full max-w-7xl flex-col">
 				<SyncIndicator dbName={dbName} client:load />
@@ -54,5 +54,5 @@ if (access !== 'ok') Astro.response.status = 404;
 				</div>
 			</div>
 		)}
-	</PageShell>
+	</AppShell>
 </Layout>

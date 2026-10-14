@@ -1,0 +1,22 @@
+---
+import AppSidebar from './AppSidebar'
+import GlobalUi from './GlobalUi'
+import MainChrome from './MainChrome'
+---
+
+<!--
+  The signed-in app frame. The sidebar and the global UI are separate islands
+  marked transition:persist, so switching drains swaps only the main column:
+  the drain list, recent activity, share avatars and the user menu stay
+  mounted instead of being rebuilt (and re-fetched) on every navigation.
+-->
+<div class="flex h-screen w-screen gap-2 overflow-hidden bg-[oklch(0.93_0_0)] p-2 dark:bg-muted">
+	<AppSidebar client:load transition:persist="app-sidebar" />
+	<main class="relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-background">
+		<MainChrome client:load />
+		<div class="flex h-full min-h-0 flex-col">
+			<slot />
+		</div>
+	</main>
+	<GlobalUi client:load transition:persist="global-ui" />
+</div>

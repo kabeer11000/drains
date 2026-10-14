@@ -35,9 +35,9 @@ import UserMenu from './UserMenu'
 
 const FOCUS_RING = 'outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50'
 
-// Below lg, the sidebar becomes a slide-over drawer toggled by PageShell's
+// Below lg, the sidebar becomes a slide-over drawer toggled by MainChrome's
 // mobile menu button instead of always occupying 30% of a screen too
-// narrow to spare that space — see PageShell.tsx.
+// narrow to spare that space — see AppShell.astro and MainChrome.tsx.
 export const $sidebarOpen = atom(false)
 
 interface Drain {
@@ -185,10 +185,21 @@ export default function AppSidebar() {
   const sidebarOpen = useStore($sidebarOpen)
   const tagsScrollRef = useRef<HTMLDivElement>(null)
   const scrollTags = (dir: 1 | -1) => tagsScrollRef.current?.scrollBy({ left: dir * 120, behavior: 'smooth' })
-  // View transitions remount this island on every navigation — if $drains
-  // (a module-level nanostore) already has data from before, skip the
-  // skeleton flash instead of forcing a loading state on every nav.
+  // If $drains already has data (it's a module-level store), skip the
+  // skeleton instead of flashing a loading state.
   const [loading, setLoading] = useState($drains.get().length === 0)
+  // This island persists across page swaps (transition:persist in
+  // AppShell.astro), so it follows navigation itself: highlight the open
+  // drain and close the phone drawer after each swap.
+  const [currentPath, setCurrentPath] = useState(typeof window !== 'undefined' ? window.location.pathname : '')
+  useEffect(() => {
+    const onPageLoad = () => {
+      setCurrentPath(window.location.pathname)
+      $sidebarOpen.set(false)
+    }
+    document.addEventListener('astro:page-load', onPageLoad)
+    return () => document.removeEventListener('astro:page-load', onPageLoad)
+  }, [])
   const [editTarget, setEditTarget] = useState<{
     dbName: string
     title: string
@@ -265,7 +276,6 @@ export default function AppSidebar() {
     navigator.clipboard.writeText(`${window.location.origin}/drains/${dbName}`)
   }
 
-  const currentPath = typeof window !== 'undefined' ? window.location.pathname : ''
 
   return (
     <>

@@ -1,5 +1,5 @@
 ---
-import PageShell from "@/components/PageShell";
+import AppShell from "@/components/AppShell.astro";
 import HomeStart from "@/components/HomeStart";
 import Layout from "../layouts/Layout.astro";
 import LandingLayout from "@/components/LandingLayout.astro";
@@ -11,9 +11,9 @@ const identity = cookie ? cookie.json() : null;
 
 {identity ? (
 	<Layout noindex>
-		<PageShell client:load>
+		<AppShell>
 			<HomeStart client:load />
-		</PageShell>
+		</AppShell>
 	</Layout>
 ) : (
 	<LandingLayout>
