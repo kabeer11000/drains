@@ -20,6 +20,16 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? "https://drains.d
 <!doctype html>
 <html lang="en">
 	<head>
+		{import.meta.env.DEV && (
+			// React Scan (dev only): add ?scan to the URL to highlight every React
+			// re-render; it stays on for the tab. It must load before React, hence
+			// a blocking script written into <head> while it's still parsing.
+			<script is:inline>
+				if (/[?&]scan/.test(location.search)) sessionStorage.setItem('sk_scan', '1');
+				if (sessionStorage.getItem('sk_scan') === '1')
+					document.write('<script src="/node_modules/react-scan/dist/auto.global.js"><\/script>');
+			</script>
+		)}
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width" />
 		<meta name="generator" content={Astro.generator} />
