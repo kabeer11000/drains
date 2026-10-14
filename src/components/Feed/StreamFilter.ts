@@ -2,10 +2,26 @@ import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state'
 import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Node as PMNode } from '@tiptap/pm/model'
+import { onlyEntryTextChanged } from './docDiff'
 import type { Step } from '@tiptap/pm/transform'
 import type { Editor } from '@tiptap/core'
 
-export const streamFilterKey = new PluginKey<Set<string>>('streamFilter')
+interface FilterState {
+  hidden: Set<string>
+  decorations: DecorationSet
+}
+
+export const streamFilterKey = new PluginKey<FilterState>('streamFilter')
+
+function buildDecorations(doc: PMNode, hidden: Set<string>): DecorationSet {
+  if (hidden.size === 0) return DecorationSet.empty
+  return DecorationSet.create(
+    doc,
+    hiddenRangesInDoc(doc, hidden).map(({ from, to }) =>
+      Decoration.node(from, to, { style: 'display:none', 'data-stream-hidden': 'true' })
+    )
+  )
+}
 
 export interface Range {
   from: number
@@ -64,7 +80,7 @@ export function stepsTouchHidden(steps: readonly Step[], hiddenRanges: Range[]):
 // you typing into an invisible block.
 export function setHiddenEntries(editor: Editor, hidden: Set<string>): boolean {
   const { state } = editor
-  const current = streamFilterKey.getState(state) ?? new Set<string>()
+  const current = streamFilterKey.getState(state)?.hidden ?? new Set<string>()
   const same = current.size === hidden.size && [...current].every((id) => hidden.has(id))
   if (same) return false
 
@@ -91,23 +107,29 @@ export const StreamFilter = Extension.create({
 
   addProseMirrorPlugins() {
     return [
-      new Plugin<Set<string>>({
+      new Plugin<FilterState>({
         key: streamFilterKey,
+        // Decorations live in plugin state: built when the hidden set changes,
+        // mapped through ordinary typing, rebuilt only when entries are added,
+        // removed or replaced. (Building them in the decorations prop walked
+        // the whole doc on every redraw.)
         state: {
-          init: () => new Set<string>(),
+          init: () => ({ hidden: new Set<string>(), decorations: DecorationSet.empty }),
           apply(tr, value) {
             const meta = tr.getMeta(streamFilterKey)
-            return meta ? meta.hidden : value
+            if (meta) return { hidden: meta.hidden, decorations: buildDecorations(tr.doc, meta.hidden) }
+            if (!tr.docChanged || value.hidden.size === 0) return value
+            return {
+              hidden: value.hidden,
+              decorations: onlyEntryTextChanged(tr.before, tr.doc)
+                ? value.decorations.map(tr.mapping, tr.doc)
+                : buildDecorations(tr.doc, value.hidden),
+            }
           },
         },
         props: {
           decorations(state) {
-            const hidden = streamFilterKey.getState(state)
-            if (!hidden || hidden.size === 0) return DecorationSet.empty
-            const decorations = hiddenRangesInDoc(state.doc, hidden).map(({ from, to }) =>
-              Decoration.node(from, to, { style: 'display:none', 'data-stream-hidden': 'true' })
-            )
-            return DecorationSet.create(state.doc, decorations)
+            return streamFilterKey.getState(state)?.decorations ?? DecorationSet.empty
           },
         },
         // Guards against USER-originated edits reaching into a hidden
@@ -120,9 +142,10 @@ export const StreamFilter = Extension.create({
         // see prosemirror-state's PluginSpec, unlike decorations above.)
         filterTransaction(tr: Transaction, state: any) {
           if (tr.getMeta('addToHistory') === false) return true
-          const hidden = streamFilterKey.getState(state)
-          if (!hidden || hidden.size === 0) return true
-          const ranges = hiddenRangesInDoc(state.doc, hidden)
+          const filter = streamFilterKey.getState(state)
+          if (!filter || filter.hidden.size === 0) return true
+          // The decoration set already holds every hidden range; no doc walk.
+          const ranges = filter.decorations.find().map((d) => ({ from: d.from, to: d.to }))
           return !stepsTouchHidden(tr.steps, ranges)
         },
       }),

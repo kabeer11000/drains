@@ -1,5 +1,6 @@
 import { Extension } from '@tiptap/core'
 import { Plugin, PluginKey, type Transaction } from '@tiptap/pm/state'
+import { onlyEntryTextChanged } from './docDiff'
 
 // Marks every entry an AI summary claims (summarizedEntryIds) with a
 // derived claimedBySummary attr. Re-summarizing the same day without
@@ -53,6 +54,9 @@ export const SummaryGrouping = Extension.create({
         key: new PluginKey('summaryGrouping'),
         appendTransaction: (transactions, _oldState, newState) => {
           if (!transactions.some((tr) => tr.docChanged)) return null
+          // Typing inside an entry can't change which entries a summary
+          // covers; skip the whole-doc pass (also skips our own attr updates).
+          if (onlyEntryTextChanged(transactions[0].before, newState.doc)) return null
 
           // Collected as a plain array first, then walked with a normal
           // index-based loop (not nested closures) — TypeScript loses

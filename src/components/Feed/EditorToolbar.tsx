@@ -49,12 +49,11 @@ export function EditorToolbar({
   editor: Editor
   anchorRef: RefObject<HTMLElement | null>
 }) {
-  // editor.isActive() doesn't trigger React renders on its own — force one
-  // on every transaction (covers both content and selection changes) so the
-  // active/toggled button state stays in sync with the cursor.
-  const [, forceUpdate] = useState(0)
+  // editor.isActive() doesn't trigger React renders on its own. Re-render
+  // only when the set of active marks changes, not on every keystroke.
+  const [, setActiveKey] = useState('')
   useEffect(() => {
-    const onTransaction = () => forceUpdate((n) => n + 1)
+    const onTransaction = () => setActiveKey(BUTTONS.map((b) => (editor.isActive(b.mark) ? '1' : '0')).join(''))
     editor.on('transaction', onTransaction)
     return () => {
       editor.off('transaction', onTransaction)

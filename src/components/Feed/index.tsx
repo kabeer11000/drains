@@ -41,6 +41,7 @@ import { AddCommentPopover } from './AddCommentPopover'
 import { EditorToolbar } from './EditorToolbar'
 import { useDrainStreams } from './useDrainStreams'
 import { createStreamSuggestion } from './StreamSuggestion'
+import { onlyEntryTextChanged } from './docDiff'
 import { Embed } from './EmbedExtension'
 import { safeName, safeColor, handleChannelShortcut, collectDays } from './utils'
 import { $comments, $summarizeDayOf, $loadWholeDrain } from '@/stores/feed'
@@ -832,9 +833,15 @@ export default function Feed({ dbName }: { dbName: string }) {
     }
 
     recomputeVisibility()
-    editor.on('update', recomputeVisibility)
+    // Typing inside an entry can't change who's visible unless the feed is
+    // filtered by search text; skip the whole-drain pass in that case.
+    const onUpdate = ({ transaction }: { transaction: any }) => {
+      if (!feedFilter.onlyMatches && onlyEntryTextChanged(transaction.before, transaction.doc)) return
+      recomputeVisibility()
+    }
+    editor.on('update', onUpdate)
     return () => {
-      editor.off('update', recomputeVisibility)
+      editor.off('update', onUpdate)
     }
   }, [editor, feedFilter, streams, streamLinks])
 

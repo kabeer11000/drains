@@ -4,6 +4,7 @@ import { decodeTime } from 'ulid'
 import { ChevronsUpDown } from 'lucide-react'
 import { $loadWholeDrain } from '@/stores/feed'
 import { bubbleLabel, chooseGranularity, itemAt, thinTicks, tickLabel, unitKey, type Tick } from './scrubber'
+import { onlyEntryTextChanged } from './docDiff'
 
 const IDLE_MS = 1200
 const MIN_THUMB = 32
@@ -95,21 +96,31 @@ export function DateScrubber({ editor }: { editor: Editor }) {
       setLayout({ contentH: scroller.scrollHeight, viewH: scroller.clientHeight, tops, times, ticks })
       setScrollTop(scroller.scrollTop)
     }
+    // Measuring reads every card's position (a layout read), so it never
+    // runs inside a typing or scrolling frame: it waits for idle time.
+    // Height changes (typing that wraps, filtering, pages loading) arrive
+    // through the ResizeObserver; entries added/removed through 'update'.
+    const idle = (cb: () => void) =>
+      'requestIdleCallback' in window
+        ? (window as any).requestIdleCallback(cb, { timeout: 300 })
+        : (setTimeout(cb, 120) as unknown as number)
+    const cancelIdle = (h: number) =>
+      'cancelIdleCallback' in window ? (window as any).cancelIdleCallback(h) : clearTimeout(h)
     const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(measure)
+      if (!frame) frame = idle(measure)
     }
     measure()
     const ro = new ResizeObserver(schedule)
     ro.observe(scroller)
     ro.observe(editor.view.dom)
-    editor.on('update', schedule)
-    // Hidden/shown entries (stream filter) change layout via decorations.
-    editor.on('transaction', schedule)
+    const onUpdate = ({ transaction }: { transaction: any }) => {
+      if (!onlyEntryTextChanged(transaction.before, transaction.doc)) schedule()
+    }
+    editor.on('update', onUpdate)
     return () => {
-      cancelAnimationFrame(frame)
+      if (frame) cancelIdle(frame)
       ro.disconnect()
-      editor.off('update', schedule)
-      editor.off('transaction', schedule)
+      editor.off('update', onUpdate)
     }
   }, [editor])
 

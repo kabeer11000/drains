@@ -1,4 +1,5 @@
 import { Extension } from '@tiptap/core'
+import { onlyEntryTextChanged } from './docDiff'
 import { Plugin, PluginKey } from '@tiptap/pm/state'
 import { monotonicFactory } from 'ulid'
 import { idBetween } from '@/utils/ulidArithmetic'
@@ -46,6 +47,9 @@ export const AssignBlockId = Extension.create<{ getIdentity: () => BlockIdentity
         key: new PluginKey('assignBlockId'),
         appendTransaction: (transactions, _oldState, newState) => {
           if (!transactions.some((tr) => tr.docChanged)) return null
+          // Every paragraph already had its id and none was split or added:
+          // nothing to assign, so skip sorting every id in the drain.
+          if (onlyEntryTextChanged(transactions[0].before, newState.doc)) return null
 
           let tr: ReturnType<typeof newState.tr> | null = null
           const identity = getIdentity()

@@ -17,6 +17,7 @@ import {
 import { $streams, $streamLinks, $feedFilter } from '@/stores/streams'
 import { UNSORTED, countByStream, selectStream } from './feedFilter'
 import { collectDays, goToAllEntries, type DayGroup } from './utils'
+import { onlyEntryTextChanged } from './docDiff'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -115,11 +116,15 @@ export function OutlineAside({
 
   useEffect(() => {
     const recompute = () => setDays(collectDays(editor.state.doc, hiddenEntryIds))
+    // Days only change when entries are added, removed or re-dated.
+    const onUpdate = ({ transaction }: { transaction: any }) => {
+      if (!onlyEntryTextChanged(transaction.before, transaction.doc)) recompute()
+    }
 
     recompute()
-    editor.on('update', recompute)
+    editor.on('update', onUpdate)
     return () => {
-      editor.off('update', recompute)
+      editor.off('update', onUpdate)
     }
   }, [editor, hiddenEntryIds])
 

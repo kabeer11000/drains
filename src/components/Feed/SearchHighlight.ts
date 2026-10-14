@@ -4,12 +4,14 @@ import { Decoration, DecorationSet } from '@tiptap/pm/view'
 import type { Node as PMNode } from '@tiptap/pm/model'
 import type { Editor } from '@tiptap/core'
 import { matchRanges, type SearchableEntry } from './search'
+import { onlyEntryTextChanged } from './docDiff'
 import { authorKeyOf, liveLinksOf } from './feedFilter'
 import { slugOfStream, type StreamDoc } from '@/services/streams'
 
 interface HighlightState {
   terms: string[]
   activeEntryId: string | null
+  decorations: DecorationSet
 }
 
 export const searchHighlightKey = new PluginKey<HighlightState>('searchHighlight')
@@ -62,9 +64,28 @@ export function streamsBySlugOf(streams: StreamDoc[]): Map<string, StreamDoc> {
   return new Map(streams.map((s) => [slugOfStream(s), s]))
 }
 
-export function setSearchHighlight(editor: Editor, state: HighlightState) {
+export function setSearchHighlight(editor: Editor, state: { terms: string[]; activeEntryId: string | null }) {
   const tr = editor.state.tr.setMeta(searchHighlightKey, state).setMeta('addToHistory', false)
   editor.view.dispatch(tr)
+}
+
+function buildHighlights(doc: PMNode, terms: string[], activeEntryId: string | null): DecorationSet {
+  if (!terms.length && !activeEntryId) return DecorationSet.empty
+  const decorations: Decoration[] = []
+  doc.forEach((node, pos) => {
+    if (node.type.name !== 'paragraph' || !node.attrs.entryId) return
+    if (node.attrs.entryId === activeEntryId) {
+      decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'search-active' }))
+    }
+    if (!terms.length) return
+    const { text, offsets } = entryText(node)
+    for (const r of matchRanges(text, terms)) {
+      // +1 steps inside the paragraph; each char maps on its own, so a hit
+      // spanning two marks (bold + plain) still lines up.
+      decorations.push(Decoration.inline(pos + 1 + offsets[r.from], pos + 1 + offsets[r.to - 1] + 1, { class: 'search-hit' }))
+    }
+  })
+  return DecorationSet.create(doc, decorations)
 }
 
 // Highlights search terms in the feed and rings the entry the find bar is
@@ -76,32 +97,24 @@ export const SearchHighlight = Extension.create({
     return [
       new Plugin<HighlightState>({
         key: searchHighlightKey,
+        // Built when the search changes, mapped through typing, rebuilt on
+        // structural changes — never a full doc walk per redraw.
         state: {
-          init: () => ({ terms: [], activeEntryId: null }),
-          apply: (tr, value) => tr.getMeta(searchHighlightKey) ?? value,
+          init: () => ({ terms: [], activeEntryId: null, decorations: DecorationSet.empty }),
+          apply: (tr, value) => {
+            const meta = tr.getMeta(searchHighlightKey) as { terms: string[]; activeEntryId: string | null } | undefined
+            if (meta) return { ...meta, decorations: buildHighlights(tr.doc, meta.terms, meta.activeEntryId) }
+            if (!tr.docChanged || (!value.terms.length && !value.activeEntryId)) return value
+            return {
+              ...value,
+              decorations: onlyEntryTextChanged(tr.before, tr.doc)
+                ? value.decorations.map(tr.mapping, tr.doc)
+                : buildHighlights(tr.doc, value.terms, value.activeEntryId),
+            }
+          },
         },
         props: {
-          decorations(state) {
-            const { terms, activeEntryId } = searchHighlightKey.getState(state) ?? { terms: [], activeEntryId: null }
-            if (!terms.length && !activeEntryId) return DecorationSet.empty
-            const decorations: Decoration[] = []
-            state.doc.forEach((node, pos) => {
-              if (node.type.name !== 'paragraph' || !node.attrs.entryId) return
-              if (node.attrs.entryId === activeEntryId) {
-                decorations.push(Decoration.node(pos, pos + node.nodeSize, { class: 'search-active' }))
-              }
-              if (!terms.length) return
-              const { text, offsets } = entryText(node)
-              for (const r of matchRanges(text, terms)) {
-                // +1 steps inside the paragraph; each char maps on its own,
-                // so a hit spanning two marks (bold + plain) still lines up.
-                const from = pos + 1 + offsets[r.from]
-                const to = pos + 1 + offsets[r.to - 1] + 1
-                decorations.push(Decoration.inline(from, to, { class: 'search-hit' }))
-              }
-            })
-            return DecorationSet.create(state.doc, decorations)
-          },
+          decorations: (state) => searchHighlightKey.getState(state)?.decorations ?? DecorationSet.empty,
         },
       }),
     ]
