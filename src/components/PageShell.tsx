@@ -1,9 +1,13 @@
 import type { ReactNode } from 'react'
 import { Menu } from 'lucide-react'
 import AppSidebar, { $sidebarOpen } from './AppSidebar'
+import { useEffect } from 'react'
 import { CommandPalette, SearchTrigger } from './CommandPalette'
+import { PerfMeter } from './PerfMeter'
+import { startPerfGovernor } from '@/services/perfGovernor'
 
 export default function PageShell({ children }: { children: ReactNode }) {
+  useEffect(startPerfGovernor, [])
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-[oklch(0.93_0_0)] dark:bg-muted p-2 gap-2">
       <AppSidebar />
@@ -24,6 +28,7 @@ export default function PageShell({ children }: { children: ReactNode }) {
         </div>
       </main>
       <CommandPalette />
+      <PerfMeter />
     </div>
   )
 }

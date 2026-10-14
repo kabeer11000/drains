@@ -49,11 +49,17 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? "https://drains.d
 				// when the OS asks for less transparency) global.css turns every
 				// backdrop-filter off and darkens overlays instead.
 				var n = navigator;
-				var lowEnd =
-					(n.hardwareConcurrency && n.hardwareConcurrency <= 4) ||
-					(n.deviceMemory && n.deviceMemory <= 4) ||
-					matchMedia('(prefers-reduced-transparency: reduce)').matches;
+				// Re-evaluated on every page swap: the runtime governor
+				// (services/perfGovernor.ts) can flag this device mid-session and
+				// remembers it for a week in localStorage.
 				function applyPerf() {
+					var lowUntil = 0;
+					try { lowUntil = Number(localStorage.getItem('sk_perf_low_until')) || 0; } catch (e) {}
+					var lowEnd =
+						(n.hardwareConcurrency && n.hardwareConcurrency <= 4) ||
+						(n.deviceMemory && n.deviceMemory <= 4) ||
+						matchMedia('(prefers-reduced-transparency: reduce)').matches ||
+						lowUntil > Date.now();
 					document.documentElement.classList.toggle('low-end', !!lowEnd);
 				}
 				applyTheme();
