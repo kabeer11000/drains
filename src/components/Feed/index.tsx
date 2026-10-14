@@ -46,6 +46,8 @@ import { Embed } from './EmbedExtension'
 import { AiTarget } from './AiTarget'
 import { safeName, safeColor, handleChannelShortcut, collectDays } from './utils'
 import { $comments, $summarizeDayOf, $loadWholeDrain } from '@/stores/feed'
+import { $sync } from '@/stores/sync'
+import { useStoreSelector } from '@/hooks/use-store-selector'
 import { DateScrubber } from './DateScrubber'
 import { X } from 'lucide-react'
 
@@ -119,6 +121,16 @@ export default function Feed({ dbName }: { dbName: string }) {
     }
   }, [dbName])
   const [hiddenIds, setHiddenIds] = useState<Set<string>>(new Set())
+  // First open of a drain on this device: the local DB starts with no docs
+  // and fills as sync pulls them. Purely presentational — entries still
+  // arrive through the normal live-changes path; this only decides whether
+  // to show a skeleton instead of an empty feed in the meantime.
+  const [firstSync, setFirstSync] = useState(false)
+  const [hasEntries, setHasEntries] = useState(true)
+  const syncStatus = useStoreSelector($sync, (m) => m[dbName]?.status ?? 'connecting', dbName)
+  useEffect(() => {
+    if (syncStatus === 'synced' || syncStatus === 'offline' || syncStatus === 'error') setFirstSync(false)
+  }, [syncStatus])
   const hiddenIdsRef = useRef(hiddenIds)
   hiddenIdsRef.current = hiddenIds
   const searchJump = useStore($searchJump)
@@ -376,6 +388,7 @@ export default function Feed({ dbName }: { dbName: string }) {
 
     Promise.all([loadLatestPage(db, INITIAL_PAGE_SIZE), db.info()]).then(([page, info]) => {
       if (cancelled) return
+      setFirstSync(info.doc_count === 0)
       contentInitializedRef.current = true
       sinceSeqRef.current = info.update_seq
 
@@ -552,6 +565,19 @@ export default function Feed({ dbName }: { dbName: string }) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
+
+  useEffect(() => {
+    if (!editor) return
+    const check = () => setHasEntries(editor.state.doc.childCount > 1)
+    check()
+    const onUpdate = ({ transaction }: { transaction: any }) => {
+      if (!onlyEntryTextChanged(transaction.before, transaction.doc)) check()
+    }
+    editor.on('update', onUpdate)
+    return () => {
+      editor.off('update', onUpdate)
+    }
+  }, [editor])
 
   // Entry menus read comments from a store (the comments column is
   // desktop-only) and ask for "summarize this day" through one.
@@ -1022,6 +1048,16 @@ export default function Feed({ dbName }: { dbName: string }) {
               <div className={initialLoaded ? 'min-h-full' : 'hidden'} onClick={handleContainerClick}>
                 <EditorContent editor={editor} />
               </div>
+              {initialLoaded && firstSync && !hasEntries && (
+                <div className="flex flex-col gap-1.5" aria-live="polite">
+                  <p className="px-1 pt-1 text-xs text-muted-foreground">Syncing this drain to your device…</p>
+                  {SKELETON_ENTRY_WIDTHS.map((width, i) => (
+                    <div key={i} className="rounded-lg border border-border bg-card p-2.5">
+                      <Skeleton className={`h-4 ${width}`} />
+                    </div>
+                  ))}
+                </div>
+              )}
               <div ref={sentinelRef} />
             </div>
             {editor && <CommentsAside editor={editor} comments={comments} onDelete={handleDeleteComment} />}
