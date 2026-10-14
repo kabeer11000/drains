@@ -278,3 +278,29 @@ export function applyLinkChange(
     map.set(entryId, set)
   }
 }
+
+export interface StreamLabel {
+  slug: string
+  name: string
+  color: string
+}
+
+// entryId (raw, no 'entry:' prefix) -> the live streams it's filed in, built
+// from a drain's raw docs. Pure, so the server (public page), the export
+// and the search index share it. Links to deleted streams are dropped.
+export function buildStreamIndex(docs: any[]): { streams: StreamLabel[]; byEntry: Map<string, StreamLabel[]> } {
+  const streams: StreamLabel[] = docs
+    .filter((d) => d?.type === 'stream' && typeof d._id === 'string')
+    .map((d) => ({ slug: d._id.slice(streamPrefix.length), name: d.name, color: d.color }))
+  const bySlug = new Map(streams.map((s) => [s.slug, s]))
+  const byEntry = new Map<string, StreamLabel[]>()
+  for (const d of docs) {
+    if (d?.type !== 'streamlink') continue
+    const stream = bySlug.get(d.streamId)
+    if (!stream) continue
+    const list = byEntry.get(d.entryId) ?? []
+    if (!list.some((s) => s.slug === stream.slug)) list.push(stream)
+    byEntry.set(d.entryId, list)
+  }
+  return { streams, byEntry }
+}

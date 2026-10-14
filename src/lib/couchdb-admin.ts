@@ -7,6 +7,7 @@
 // fetch (both browsers and Node's undici, which is what Vercel functions
 // use) rejects URLs containing userinfo ("URL contains credentials").
 import { ulid } from 'ulid'
+import { buildStreamIndex, slugify, STREAM_COLORS } from '@/services/streams'
 import { idAfter } from '@/utils/ulidArithmetic'
 
 const ADMIN_URL = import.meta.env.COUCHDB_ADMIN_URL as string | undefined
@@ -582,6 +583,45 @@ export async function getPublicEntries(dbName: string) {
 // real use (it double-prefixed to "entry:entry:<ulid>" and 404'd). Every
 // agent-facing entry route uses this before responding, so the whole
 // surface uses one consistent id shape.
+// Stream docs ('stream:*') and links ('streamlink:*') sit next to each other
+// in id order, so one range read gets both.
+export async function getStreamIndex(dbName: string) {
+  const qs = new URLSearchParams({
+    startkey: JSON.stringify('stream:'),
+    endkey: JSON.stringify('streamlink:￿'),
+    include_docs: 'true',
+  })
+  const res = await adminFetch(`/${dbName}/_all_docs?${qs}`)
+  if (!res.ok) throw new Error(`Failed to read streams for ${dbName} (${res.status})`)
+  const data = await res.json()
+  return buildStreamIndex(data.rows.map((r: any) => r.doc).filter(Boolean))
+}
+
+// Files an entry into streams by name for the API/MCP, creating any stream
+// that doesn't exist yet. Same slug rule as the app (services/streams.ts),
+// so "HCI" from an agent and #hci typed in the editor are one stream.
+export async function fileEntryInStreams(dbName: string, entryId: string, names: string[], email: string) {
+  const index = await getStreamIndex(dbName)
+  const known = new Map(index.streams.map((s) => [s.slug, s]))
+  const slugs: string[] = []
+  for (const raw of names) {
+    const name = raw.trim().replace(/^#/, '')
+    if (!name) continue
+    const slug = slugify(name)
+    if (!known.has(slug)) {
+      const color = STREAM_COLORS[known.size % STREAM_COLORS.length]
+      await putAdminDoc(dbName, { _id: `stream:${slug}`, type: 'stream', name, color, createdByEmail: email, createdAt: Date.now() })
+      known.set(slug, { slug, name, color })
+    }
+    const linkId = `streamlink:${entryId}:${slug}`
+    if (!(await getAdminDoc(dbName, linkId))) {
+      await putAdminDoc(dbName, { _id: linkId, type: 'streamlink', entryId, streamId: slug, createdByEmail: email, createdAt: Date.now() })
+    }
+    slugs.push(slug)
+  }
+  return [...new Set(slugs)]
+}
+
 export function stripEntryPrefix(doc: any) {
   return { ...doc, _id: doc._id.startsWith('entry:') ? doc._id.slice('entry:'.length) : doc._id }
 }

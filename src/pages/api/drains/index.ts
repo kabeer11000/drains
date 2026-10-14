@@ -34,7 +34,9 @@ export const POST: APIRoute = async ({ request }) => {
 
   const body = await request.json().catch(() => ({}))
   const title = typeof body.title === 'string' && body.title.trim() ? body.title.trim() : 'Untitled'
-  const visibility = body.visibility === 'shared' ? 'shared' : 'private'
+  // Always private at creation: a drain becomes shared when someone is
+  // invited (syncDrainVisibility), so a requested 'shared' is ignored.
+  const visibility = 'private'
   const description = typeof body.description === 'string' ? body.description.trim() || undefined : undefined
   const tags = Array.isArray(body.tags) ? body.tags.filter((t: unknown) => typeof t === 'string') : undefined
 

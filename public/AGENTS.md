@@ -61,6 +61,9 @@ single drain, and can be revoked at any time from the same menu.
 - Read entries in any drain the token's account can access
 - Create new entries (@mentions and `[[ references ]]` are parsed the
   same way they are for a human-typed entry)
+- File entries into **streams**, topics inside a drain (e.g. `HCI`,
+  `Releases`): pass `streams` to `append_entry`, and call `list_streams`
+  first to reuse existing names. Listed entries carry their `streams`.
 - List and manage drain members
 - Update drain metadata (title, description, tags)
 

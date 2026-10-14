@@ -66,3 +66,19 @@ describe('applyLinkChange', () => {
     expect(map.has('weird:entry:id')).toBe(false)
   })
 })
+
+describe('buildStreamIndex', () => {
+  it('maps entries to their live streams and drops links to deleted ones', async () => {
+    const { buildStreamIndex } = await import('./streams')
+    const { byEntry, streams } = buildStreamIndex([
+      { _id: 'stream:hci', type: 'stream', name: 'HCI', color: 'red' },
+      { _id: 'streamlink:e1:hci', type: 'streamlink', entryId: 'e1', streamId: 'hci' },
+      { _id: 'streamlink:e1:hci', type: 'streamlink', entryId: 'e1', streamId: 'hci' },
+      { _id: 'streamlink:e2:gone', type: 'streamlink', entryId: 'e2', streamId: 'gone' },
+      { _id: 'entry:e1', type: 'entry', content: '<p>x</p>' },
+    ])
+    expect(streams).toEqual([{ slug: 'hci', name: 'HCI', color: 'red' }])
+    expect(byEntry.get('e1')).toEqual([{ slug: 'hci', name: 'HCI', color: 'red' }])
+    expect(byEntry.has('e2')).toBe(false)
+  })
+})

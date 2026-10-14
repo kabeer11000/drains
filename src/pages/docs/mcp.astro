@@ -46,6 +46,7 @@ import DocsLayout from '@/components/DocsLayout.astro'
   <h2>What an agent can do</h2>
   <ul>
     <li>Read entries in any drain the token's account can access</li>
+    <li>File entries into streams (topics inside a drain) with <code>append_entry</code>'s <code>streams</code>, and list them with <code>list_streams</code></li>
     <li>Create new entries — <code>@mentions</code> and <code>[[ references ]]</code> are parsed the same way they are for a human-typed entry</li>
     <li>List and manage drain members</li>
     <li>Update drain metadata (title, description, tags)</li>
