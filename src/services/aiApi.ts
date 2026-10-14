@@ -12,13 +12,25 @@ export interface AiUsage {
 // without each needing its own fetch/poll.
 export const $aiUsage = atom<AiUsage | null>(null)
 
+// The user menu remounts on every navigation; ask the server at most once a
+// minute (summaries/cleanups still update $aiUsage from their responses).
+let usageFetchedAt = 0
+let usageRequest: Promise<AiUsage> | null = null
+
 export async function fetchAiUsage(): Promise<AiUsage> {
-  const res = await fetch('/api/ai/usage', {
-    headers: { Authorization: authHeader() },
-  })
-  const { usage } = await parseErrorOr<{ usage: AiUsage }>(res, 'Failed to load AI usage')
-  $aiUsage.set(usage)
-  return usage
+  const cached = $aiUsage.get()
+  if (cached && Date.now() - usageFetchedAt < 60_000) return cached
+  usageRequest ??= fetch('/api/ai/usage', { headers: { Authorization: authHeader() } })
+    .then((res) => parseErrorOr<{ usage: AiUsage }>(res, 'Failed to load AI usage'))
+    .then(({ usage }) => {
+      usageFetchedAt = Date.now()
+      $aiUsage.set(usage)
+      return usage
+    })
+    .finally(() => {
+      usageRequest = null
+    })
+  return usageRequest
 }
 
 export async function cleanupText(text: string): Promise<{ text: string }> {

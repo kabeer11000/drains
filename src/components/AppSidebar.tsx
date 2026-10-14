@@ -280,7 +280,7 @@ export default function AppSidebar() {
         />
       )}
       <aside
-        className={`fixed inset-x-2 bottom-2 z-50 flex h-[94%] max-h-[900px] flex-col rounded-2xl bg-background transition-transform duration-200 lg:static lg:inset-auto lg:z-auto lg:h-full lg:max-h-none lg:w-[30%] lg:translate-y-0 lg:rounded-xl ${
+        className={`fixed inset-x-2 bottom-2 z-50 flex h-[94%] max-h-[900px] flex-col rounded-2xl bg-background transition-transform duration-200 max-lg:will-change-transform lg:static lg:inset-auto lg:z-auto lg:h-full lg:max-h-none lg:w-[30%] lg:translate-y-0 lg:rounded-xl ${
           sidebarOpen ? 'translate-y-0' : 'translate-y-[calc(100%+1rem)]'
         }`}
       >

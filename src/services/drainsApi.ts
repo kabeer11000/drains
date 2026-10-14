@@ -68,6 +68,7 @@ export async function updateDrainApi(
 }
 
 export async function inviteToDrain(dbName: string, email: string): Promise<void> {
+  membersCache.delete(dbName)
   const res = await fetch(`/api/drains/${dbName}/invite`, {
     method: 'POST',
     headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
@@ -76,13 +77,25 @@ export async function inviteToDrain(dbName: string, email: string): Promise<void
   await parseErrorOr(res, 'Failed to invite')
 }
 
-export async function listDrainMembers(dbName: string): Promise<string[]> {
-  const res = await fetch(`/api/drains/${dbName}/members`, { headers: { Authorization: authHeader() } })
-  const data = await parseErrorOr<{ members: string[] }>(res, 'Failed to load members')
-  return data.members
+// Every sidebar card and the title chip asked for their drain's members on
+// each navigation (islands remount), one request per shared drain. Shared
+// for a minute; invite/remove clear the drain's entry.
+const MEMBERS_TTL_MS = 60_000
+const membersCache = new Map<string, { at: number; members: Promise<string[]> }>()
+
+export function listDrainMembers(dbName: string): Promise<string[]> {
+  const hit = membersCache.get(dbName)
+  if (hit && Date.now() - hit.at < MEMBERS_TTL_MS) return hit.members
+  const members = fetch(`/api/drains/${dbName}/members`, { headers: { Authorization: authHeader() } })
+    .then((res) => parseErrorOr<{ members: string[] }>(res, 'Failed to load members'))
+    .then((data) => data.members)
+  membersCache.set(dbName, { at: Date.now(), members })
+  members.catch(() => membersCache.delete(dbName))
+  return members
 }
 
 export async function removeDrainMemberApi(dbName: string, email: string): Promise<void> {
+  membersCache.delete(dbName)
   const res = await fetch(`/api/drains/${dbName}/members`, {
     method: 'DELETE',
     headers: { Authorization: authHeader(), 'Content-Type': 'application/json' },
