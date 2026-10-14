@@ -53,18 +53,27 @@ export const CommentsAside = memo(function CommentsAside({
         next.set(comment.commentId, top)
         cursor = top + (heights.get(comment.commentId) ?? FALLBACK_HEIGHT) + GAP
       }
-      setPositions(next)
+      setPositions((prev) =>
+        prev.size === next.size && [...next].every(([id, top]) => prev.get(id) === top) ? prev : next
+      )
     }
 
+    // Once per frame: a burst of transactions (sync, paging) would otherwise
+    // set state synchronously inside each one and trip React's update limit.
+    let frame = 0
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(() => ((frame = 0), recompute()))
+    }
     recompute()
-    editor.on('update', recompute)
-    const ro = new ResizeObserver(recompute)
+    editor.on('update', schedule)
+    const ro = new ResizeObserver(schedule)
     ro.observe(editor.view.dom)
-    window.addEventListener('resize', recompute)
+    window.addEventListener('resize', schedule)
     return () => {
-      editor.off('update', recompute)
+      cancelAnimationFrame(frame)
+      editor.off('update', schedule)
       ro.disconnect()
-      window.removeEventListener('resize', recompute)
+      window.removeEventListener('resize', schedule)
     }
   }, [editor, comments, heights])
 
