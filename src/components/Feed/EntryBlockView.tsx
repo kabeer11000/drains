@@ -4,19 +4,33 @@ import { GitCommit, Sparkles, Bot, Trash2, MoreHorizontal } from 'lucide-react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Button } from '@/components/ui/button'
 import { $streams, $streamLinks, $feedFilter } from '@/stores/streams'
+import { useStoreSelector, sameItems } from '@/hooks/use-store-selector'
+import type { CommentDoc } from '@/services/comments'
 import { relativeTime, safeName, safeColor } from './utils'
 import { slugOfStream } from '@/services/streams'
 import { singleSelectedStream } from './feedFilter'
 import { StreamPicker } from './StreamPicker'
 import { $comments, $summarizeDayOf } from '@/stores/feed'
 
+const NO_COMMENTS: CommentDoc[] = []
+
 export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
   const { entryId, authorColor, authorName, updatedAt, createdAt, createdByName, source, viaToken } = node.attrs
+  // Stream renames/recolours are rare, so every card may follow $streams.
+  // Links, comments and the filter change often: each card subscribes to
+  // just its own slice so one change doesn't re-render the whole feed.
   const streams = useStore($streams)
-  const streamLinks = useStore($streamLinks)
-  const feedFilter = useStore($feedFilter)
-  const comments = useStore($comments)
-  const entryComments = entryId ? comments.filter((c) => c.entryId === entryId) : []
+  const linkedKey = useStoreSelector(
+    $streamLinks,
+    (m) => (entryId ? [...(m.get(entryId) ?? [])].sort().join('|') : ''),
+    entryId
+  )
+  const entryComments = useStoreSelector(
+    $comments,
+    (cs) => (entryId ? cs.filter((c) => c.entryId === entryId) : NO_COMMENTS),
+    entryId,
+    sameItems
+  )
   const isIngested = source === 'github'
   const isSummary = source === 'ai-summary'
   const SourceIcon = isSummary ? Sparkles : GitCommit
@@ -59,13 +73,13 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
 
   // Live streams this entry is filed in, shown as colored labels before the
   // text. Links to a deleted stream are skipped (the entry reads as unsorted).
-  const linked = entryId ? streamLinks.get(entryId) : undefined
+  const linked = linkedKey ? new Set(linkedKey.split('|')) : undefined
   const labels = linked
     ? streams.filter((s) => linked.has(slugOfStream(s))).map((s) => ({ slug: slugOfStream(s), name: s.name, color: s.color }))
     : []
   // AI summaries describe a whole day, so they aren't filed themselves.
   const fileable = !!entryId && !isComposer && !isSummary
-  const composerSlug = isComposer ? singleSelectedStream(feedFilter) : null
+  const composerSlug = useStoreSelector($feedFilter, (f) => (isComposer ? singleSelectedStream(f) : null), isComposer)
   const composerStream = composerSlug ? streams.find((s) => slugOfStream(s) === composerSlug) : undefined
 
   return (

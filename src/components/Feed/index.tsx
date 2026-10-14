@@ -928,7 +928,8 @@ export default function Feed({ dbName }: { dbName: string }) {
     if (e.target === e.currentTarget) editor?.chain().focus('start').run()
   }
 
-  const handleSummarize = async (key: string, entryIds: string[]) => {
+  // Stable identity so the memoized sidebar doesn't re-render on every save.
+  const handleSummarize = useCallback(async (key: string, entryIds: string[]) => {
     setSummarizingKey(key)
     setSummarizeError(null)
     // entryIds come in doc order, so [0] is the day's topmost entry — the
@@ -945,7 +946,7 @@ export default function Feed({ dbName }: { dbName: string }) {
       hideSkeleton?.()
       setSummarizingKey(null)
     }
-  }
+  }, [editor, dbName])
 
   if (!identity) return null
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, memo } from 'react'
 import type { Editor } from '@tiptap/react'
 import { CommentCard } from './CommentCard'
 import type { CommentDoc } from '@/services/comments'
@@ -9,7 +9,9 @@ const GAP = 8
 // not a permanent cap; real heights take over once CommentCard reports them.
 const FALLBACK_HEIGHT = 80
 
-export function CommentsAside({
+// Memoized: Feed re-renders on every save (the Saving… pill); this column
+// only needs to when its own props change.
+export const CommentsAside = memo(function CommentsAside({
   editor,
   comments,
   onDelete,
@@ -83,4 +85,4 @@ export function CommentsAside({
       })}
     </div>
   )
-}
+})

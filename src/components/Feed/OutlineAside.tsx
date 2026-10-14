@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, memo } from 'react'
 import type { Editor } from '@tiptap/react'
 import { useStore } from '@nanostores/react'
 import { Sparkles, Loader2, Plus, MoreHorizontal, Pencil, Trash2, Inbox, Layers } from 'lucide-react'
@@ -86,7 +86,9 @@ function ChannelRow({
 // command palette — Ctrl/Cmd+K, '/', Ctrl/Cmd+F.)
 // Channels replace the old show/hide layers: clicking a stream switches the
 // feed to it (and new entries get filed there), Ctrl/Cmd-click combines.
-export function OutlineAside({
+// Memoized: Feed re-renders on every save (the Saving… pill); this column
+// only needs to when its own props change.
+export const OutlineAside = memo(function OutlineAside({
   editor,
   dbName,
   hiddenEntryIds,
@@ -374,4 +376,4 @@ export function OutlineAside({
       </div>
     </div>
   )
-}
+})
