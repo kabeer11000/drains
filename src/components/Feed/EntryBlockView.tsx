@@ -1,7 +1,7 @@
 import { NodeViewWrapper, NodeViewContent, type NodeViewProps } from '@tiptap/react'
 import { useStore } from '@nanostores/react'
 import { GitCommit, Sparkles, Bot, Trash2, MoreHorizontal } from 'lucide-react'
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { LazyPopover } from '@/components/ui/lazy-popover'
 import { Button } from '@/components/ui/button'
 import { $streams, $streamLinks, $feedFilter } from '@/stores/streams'
 import { useStoreSelector, sameItems } from '@/hooks/use-store-selector'
@@ -159,16 +159,15 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
           )}
         </span>
       )}
-      {!isComposer && <Popover>
-        {/* Details + actions for this entry. Inside the card's top-right
-            corner as a real tap target: hover-revealed on desktop, always
-            (faintly) shown on touch screens, which have no hover — the old
-            floating pill above the card was unreachable on a phone. Touch
-            cards reserve right padding for it (global.css) so it never
-            covers text. Icon-only so it fits the gutter every card reserves
-            (global.css); the time is in its tooltip and in the menu. */}
-        <PopoverTrigger
-          render={
+      {/* Details + actions for this entry. Inside the card's top-right
+          corner as a real tap target: hover-revealed on desktop, always
+          (faintly) shown on touch screens, which have no hover. Cards reserve
+          right padding for it (global.css) so it never covers text. The
+          time is in its tooltip and in the menu. */}
+      {!isComposer && <LazyPopover
+        align="end"
+        contentClassName="w-72 text-sm"
+        trigger={
             <button
               type="button"
               contentEditable={false}
@@ -176,11 +175,9 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
               title={`${creator} · ${updatedAt ? relativeTime(Number(updatedAt)) : ''}`}
               className="absolute top-1.5 right-1.5 flex size-7 items-center justify-center rounded-md border border-transparent text-muted-foreground opacity-0 outline-none transition-opacity group-hover:border-border group-hover:bg-background/90 group-hover:opacity-100 hover:text-foreground focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-ring data-[popup-open]:opacity-100 [@media(hover:none)]:opacity-70"
             />
-          }
-        >
-          <MoreHorizontal className="size-3.5" />
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-72 text-sm" contentEditable={false}>
+        }
+        triggerChildren={<MoreHorizontal className="size-3.5" />}
+      >
           <div className="flex items-center gap-2 font-medium">
             {isIngested || isSummary ? (
               <SourceIcon className="size-3 shrink-0" />
@@ -257,8 +254,7 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
               Delete summary
             </Button>
           )}
-        </PopoverContent>
-      </Popover>}
+      </LazyPopover>}
       {isCleaning && (
         <span
           contentEditable={false}
@@ -269,18 +265,18 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
         </span>
       )}
       {fileable && labels.length > 0 && (
-        <Popover>
-          <PopoverTrigger
-            render={
-              <button
-                type="button"
-                contentEditable={false}
-                title="Change streams"
-                className="mr-1.5 inline-flex max-w-full items-center gap-1 rounded align-[1px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            }
-          >
-            {labels.map((l) => (
+        <LazyPopover
+          align="start"
+          contentClassName="w-56 p-1.5 text-sm"
+          trigger={
+            <button
+              type="button"
+              contentEditable={false}
+              title="Change streams"
+              className="mr-1.5 inline-flex max-w-full items-center gap-1 rounded align-[1px] outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+          triggerChildren={labels.map((l) => (
               <span
                 key={l.slug}
                 className="inline-flex items-center rounded px-1.5 py-px text-[11px] font-semibold leading-4"
@@ -289,11 +285,9 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
                 {l.name}
               </span>
             ))}
-          </PopoverTrigger>
-          <PopoverContent align="start" className="w-56 p-1.5 text-sm" contentEditable={false}>
-            <StreamPicker entryId={entryId} />
-          </PopoverContent>
-        </Popover>
+        >
+          <StreamPicker entryId={entryId} />
+        </LazyPopover>
       )}
       <NodeViewContent as="span" className={isCleaning ? 'invisible' : undefined} />
     </NodeViewWrapper>

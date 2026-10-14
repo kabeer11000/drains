@@ -49,6 +49,9 @@ import { DateScrubber } from './DateScrubber'
 import { X } from 'lucide-react'
 
 const PAGE_SIZE = 50
+// Opening a drain renders this many cards; the rest page in as you scroll.
+// Every card is a React node view, so fewer up front = a faster open.
+const INITIAL_PAGE_SIZE = 20
 const SAVE_DEBOUNCE_MS = 500
 
 // Astro's ClientRouter can swap client:only islands without reliably running
@@ -369,7 +372,7 @@ export default function Feed({ dbName }: { dbName: string }) {
     if (contentInitializedRef.current) return
     let cancelled = false
 
-    Promise.all([loadLatestPage(db, PAGE_SIZE), db.info()]).then(([page, info]) => {
+    Promise.all([loadLatestPage(db, INITIAL_PAGE_SIZE), db.info()]).then(([page, info]) => {
       if (cancelled) return
       contentInitializedRef.current = true
       sinceSeqRef.current = info.update_seq
@@ -420,7 +423,7 @@ export default function Feed({ dbName }: { dbName: string }) {
       })
       // page is newest-first; the oldest loaded entry (pagination anchor) is last.
       oldestFullIdRef.current = page[page.length - 1]?._id ?? null
-      hasMoreRef.current = page.length === PAGE_SIZE
+      hasMoreRef.current = page.length === INITIAL_PAGE_SIZE
       requestAnimationFrame(() => setInitialLoaded(true))
     })
     return () => {
