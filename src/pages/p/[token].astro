@@ -1,6 +1,7 @@
 ---
 import Layout from "@/layouts/Layout.astro";
-import { getDrainByPublicToken, getAdminDoc, getPublicEntries } from "@/lib/couchdb-admin";
+import { getDrainByPublicToken, getAdminDoc, getPublicEntries, getStreamIndex } from "@/lib/couchdb-admin";
+import { sanitizeEntryHtml } from "@/lib/sanitizeServer";
 
 export const prerender = false;
 
@@ -9,8 +10,10 @@ const resolved = await getDrainByPublicToken(token);
 
 let notebook: any = null;
 let entries: any[] = [];
+let streamsByEntry = new Map<string, { slug: string; name: string; color: string }[]>();
 if (resolved) {
 	notebook = await getAdminDoc(resolved.dbName, "notebook");
+	streamsByEntry = (await getStreamIndex(resolved.dbName).catch(() => null))?.byEntry ?? streamsByEntry;
 	entries = (await getPublicEntries(resolved.dbName)).filter(
 		(entry) => typeof entry.content === "string" && entry.content.replace(/<[^>]*>/g, "").trim().length > 0
 	);
@@ -66,7 +69,17 @@ const pageDescription = resolved
 								// 	/>
 								// ) : (
 								entry.source === "ai-summary" ? null : (
-									<div class="mb-1.5" set:html={entry.content} />
+									<div class="mb-1.5">
+										{(streamsByEntry.get(entry._id.replace(/^entry:/, "")) ?? []).map((st) => (
+											<span
+												class="mr-1.5 inline-flex rounded px-1.5 py-px align-[1px] text-[11px] font-semibold"
+												style={`background: color-mix(in srgb, ${st.color} 16%, transparent); color: ${st.color}`}
+											>
+												{st.name}
+											</span>
+										))}
+										<Fragment set:html={sanitizeEntryHtml(entry.content)} />
+									</div>
 								)
 								// )
 							}
