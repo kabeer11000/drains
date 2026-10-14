@@ -8,12 +8,15 @@ import { relativeTime, safeName, safeColor } from './utils'
 import { slugOfStream } from '@/services/streams'
 import { singleSelectedStream } from './feedFilter'
 import { StreamPicker } from './StreamPicker'
+import { $comments, $summarizeDayOf } from '@/stores/feed'
 
 export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
   const { entryId, authorColor, authorName, updatedAt, createdAt, createdByName, source, viaToken } = node.attrs
   const streams = useStore($streams)
   const streamLinks = useStore($streamLinks)
   const feedFilter = useStore($feedFilter)
+  const comments = useStore($comments)
+  const entryComments = entryId ? comments.filter((c) => c.entryId === entryId) : []
   const isIngested = source === 'github'
   const isSummary = source === 'ai-summary'
   const SourceIcon = isSummary ? Sparkles : GitCommit
@@ -194,6 +197,34 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
               <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Streams</p>
               <StreamPicker entryId={entryId} autoFocus={false} />
             </div>
+          )}
+          {entryComments.length > 0 && (
+            <div className="mt-3 border-t pt-2.5">
+              <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Comments ({entryComments.length})</p>
+              <div className="flex max-h-40 flex-col gap-2 overflow-y-auto">
+                {entryComments.map((c) => (
+                  <div key={c._id} className="text-xs">
+                    <span className="font-medium" style={{ color: safeColor(c.authorColor) }}>
+                      {safeName(c.authorName)}
+                    </span>{' '}
+                    <span className="text-muted-foreground">{relativeTime(c.createdAt)}</span>
+                    <p className="mt-0.5 break-words text-foreground/90">{c.text}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {!isSummary && createdAt && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-3 w-full"
+              onClick={() => $summarizeDayOf.set(entryId)}
+            >
+              <Sparkles className="size-3.5" />
+              Summarize this day
+            </Button>
           )}
           {isSummary && (
             <Button

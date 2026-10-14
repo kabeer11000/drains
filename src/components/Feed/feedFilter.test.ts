@@ -14,15 +14,14 @@ import {
 
 const f = (over: Partial<FeedFilter> = {}): FeedFilter => ({ ...EMPTY_FILTER, ...over })
 const live = new Set(['hci', 'compiler'])
-const me = { authorKey: 'me@x.com' }
+const me = {}
 
 describe('isFilterActive', () => {
   it('is false for the default filter', () => {
     expect(isFilterActive(EMPTY_FILTER)).toBe(false)
   })
-  it('is true for a channel or author selection', () => {
+  it('is true for a channel selection', () => {
     expect(isFilterActive(f({ streams: new Set(['hci']) }))).toBe(true)
-    expect(isFilterActive(f({ authors: new Set(['a@b.com']) }))).toBe(true)
   })
   it('ignores a query unless onlyMatches is on', () => {
     expect(isFilterActive(f({ query: 'x' }))).toBe(false)
@@ -104,12 +103,6 @@ describe('isEntryVisible', () => {
     expect(isEntryVisible(me, links, live, f({ streams: new Set(['deleted-stream']) }))).toBe(false)
   })
 
-  it('ANDs authors with streams', () => {
-    const filter = f({ streams: new Set(['hci']), authors: new Set(['other@x.com']) })
-    expect(isEntryVisible(me, new Set(['hci']), live, filter)).toBe(false)
-    expect(isEntryVisible({ authorKey: 'other@x.com' }, new Set(['hci']), live, filter)).toBe(true)
-  })
-
   it('hides non-matching entries only with onlyMatches on', () => {
     const noMatch = { ...me, matches: false }
     expect(isEntryVisible(noMatch, undefined, live, f({ query: 'x' }))).toBe(true)
@@ -120,7 +113,7 @@ describe('isEntryVisible', () => {
   })
 
   it('always shows pinned entries (composer, cursor, just-typed)', () => {
-    const filter = f({ streams: new Set(['hci']), authors: new Set(['nobody']) })
+    const filter = f({ streams: new Set(['hci']) })
     expect(isEntryVisible({ ...me, pinned: true }, undefined, live, filter)).toBe(true)
   })
 })
@@ -144,7 +137,6 @@ describe('isPristine', () => {
     expect(isPristine(EMPTY_FILTER, false)).toBe(true)
     expect(isPristine(EMPTY_FILTER, true)).toBe(false)
     expect(isPristine(f({ streams: new Set(['hci']) }), false)).toBe(false)
-    expect(isPristine(f({ authors: new Set(['a']) }), false)).toBe(false)
     expect(isPristine(f({ query: 'x', onlyMatches: true }), false)).toBe(false)
     expect(isPristine(f({ query: 'x' }), false)).toBe(true)
   })

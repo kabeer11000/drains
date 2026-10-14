@@ -19,7 +19,6 @@ function loadStoredFilter(dbName: string): FeedFilter {
     return {
       ...EMPTY_FILTER,
       streams: new Set(Array.isArray(parsed.streams) ? parsed.streams : []),
-      authors: new Set(Array.isArray(parsed.authors) ? parsed.authors : []),
     }
   } catch {
     return EMPTY_FILTER
@@ -28,7 +27,7 @@ function loadStoredFilter(dbName: string): FeedFilter {
 
 function saveFilter(dbName: string, f: FeedFilter) {
   if (typeof localStorage === 'undefined') return
-  localStorage.setItem(filterKey(dbName), JSON.stringify({ streams: [...f.streams], authors: [...f.authors] }))
+  localStorage.setItem(filterKey(dbName), JSON.stringify({ streams: [...f.streams] }))
 }
 
 // Loads a drain's streams + streamlinks into the shared stores and keeps

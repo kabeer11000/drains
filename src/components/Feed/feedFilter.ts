@@ -11,7 +11,6 @@ export interface FeedFilter {
   // Channel selection: empty = "All entries". Otherwise an entry shows if
   // it's in any selected stream (or has none and UNSORTED is selected).
   streams: Set<string>
-  authors: Set<string>
   // Search narrows the feed only when the user asks for it ("Only
   // matches"); by default it highlights and lists results instead.
   query: string
@@ -20,13 +19,12 @@ export interface FeedFilter {
 
 export const EMPTY_FILTER: FeedFilter = {
   streams: new Set(),
-  authors: new Set(),
   query: '',
   onlyMatches: false,
 }
 
 export function isFilterActive(f: FeedFilter): boolean {
-  return f.streams.size > 0 || f.authors.size > 0 || (f.onlyMatches && f.query.trim().length > 0)
+  return f.streams.size > 0 || (f.onlyMatches && f.query.trim().length > 0)
 }
 
 // Plain click switches to a channel (clicking the active one goes back to
@@ -68,15 +66,6 @@ export function authorKeyOf(attrs: {
   return `name:${attrs.createdByName ?? ''}`
 }
 
-export function describeAuthorKey(key: string): string {
-  if (key === 'source:github') return 'GitHub'
-  if (key === 'source:ai-summary') return 'AI Summary'
-  if (key.startsWith('source:')) return key.slice('source:'.length)
-  if (key.startsWith('token:')) return key.slice('token:'.length)
-  if (key.startsWith('name:')) return key.slice('name:'.length)
-  return key // bare (lowercased) email
-}
-
 // Links to deleted streams don't count — an entry whose only streams were
 // deleted falls back to Unsorted rather than vanishing.
 export function liveLinksOf(links: Set<string> | undefined, liveStreams: Set<string>): string[] {
@@ -95,11 +84,11 @@ export function countByStream(links: Map<string, Set<string>>, liveStreams: Set<
 
 // Nothing narrows the feed and no search is being stepped through.
 export function isPristine(f: FeedFilter, searching: boolean): boolean {
-  return !searching && f.streams.size === 0 && f.authors.size === 0 && !(f.onlyMatches && f.query.trim())
+  return !searching && f.streams.size === 0 && !(f.onlyMatches && f.query.trim())
 }
 
 export function isEntryVisible(
-  entry: { authorKey: string; pinned?: boolean; matches?: boolean },
+  entry: { pinned?: boolean; matches?: boolean },
   links: Set<string> | undefined,
   liveStreams: Set<string>,
   f: FeedFilter
@@ -111,8 +100,6 @@ export function isEntryVisible(
     const inStream = effective.length === 0 ? f.streams.has(UNSORTED) : effective.some((s) => f.streams.has(s))
     if (!inStream) return false
   }
-
-  if (f.authors.size > 0 && !f.authors.has(entry.authorKey)) return false
 
   if (f.onlyMatches && f.query.trim() && entry.matches === false) return false
 

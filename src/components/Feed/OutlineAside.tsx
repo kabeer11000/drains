@@ -16,7 +16,7 @@ import {
 } from '@/services/streams'
 import { $streams, $streamLinks, $feedFilter } from '@/stores/streams'
 import { UNSORTED, countByStream, selectStream } from './feedFilter'
-import { entryDayTs, dayLabel, goToAllEntries } from './utils'
+import { collectDays, goToAllEntries, type DayGroup } from './utils'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -104,7 +104,7 @@ export function OutlineAside({
   const streamLinks = useStore($streamLinks)
   const filter = useStore($feedFilter)
 
-  const [days, setDays] = useState<{ key: string; label: string; entryId: string; entryIds: string[] }[]>([])
+  const [days, setDays] = useState<DayGroup[]>([])
   const [creating, setCreating] = useState(false)
   const [newName, setNewName] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
@@ -114,29 +114,7 @@ export function OutlineAside({
   )
 
   useEffect(() => {
-    const recompute = () => {
-      const byDay = new Map<string, { label: string; entryId: string; entryIds: string[] }>()
-      editor.state.doc.forEach((node: any) => {
-        // Previous AI summaries are skipped so "summarize this day" never
-        // re-summarizes its own summary; hidden entries are skipped so the
-        // outline and summaries follow the current channel.
-        if (
-          node.type.name !== 'paragraph' ||
-          !node.attrs.entryId ||
-          !node.attrs.createdAt ||
-          node.attrs.source === 'ai-summary' ||
-          hiddenEntryIds.has(node.attrs.entryId)
-        ) {
-          return
-        }
-        const ts = entryDayTs(node.attrs.entryId, node.attrs.createdAt)
-        const key = new Date(ts).toDateString()
-        const existing = byDay.get(key)
-        if (existing) existing.entryIds.push(node.attrs.entryId)
-        else byDay.set(key, { label: dayLabel(ts), entryId: node.attrs.entryId, entryIds: [node.attrs.entryId] })
-      })
-      setDays(Array.from(byDay, ([key, v]) => ({ key, ...v })))
-    }
+    const recompute = () => setDays(collectDays(editor.state.doc, hiddenEntryIds))
 
     recompute()
     editor.on('update', recompute)

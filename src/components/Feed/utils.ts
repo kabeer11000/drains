@@ -84,3 +84,27 @@ export function handleChannelShortcut(e: KeyboardEvent): boolean {
   $feedFilter.set(selectStream({ ...$feedFilter.get(), streams: new Set() }, slugOfStream(stream), false))
   return true
 }
+
+export interface DayGroup {
+  key: string
+  label: string
+  entryId: string // the day's first (newest) entry, to jump to
+  entryIds: string[] // what "Summarize this day" sends
+}
+
+// Entries grouped by day, in feed order. AI summaries are skipped so a day
+// is never re-summarized from its own summary; hidden (filtered-out)
+// entries are skipped so days and summaries follow the open stream.
+export function collectDays(doc: { forEach: (fn: (node: any) => void) => void }, hidden: Set<string>): DayGroup[] {
+  const byDay = new Map<string, DayGroup>()
+  doc.forEach((node: any) => {
+    const { entryId, createdAt, source } = node.attrs ?? {}
+    if (node.type.name !== 'paragraph' || !entryId || !createdAt || source === 'ai-summary' || hidden.has(entryId)) return
+    const ts = entryDayTs(entryId, createdAt)
+    const key = new Date(ts).toDateString()
+    const day = byDay.get(key)
+    if (day) day.entryIds.push(entryId)
+    else byDay.set(key, { key, label: dayLabel(ts), entryId, entryIds: [entryId] })
+  })
+  return [...byDay.values()]
+}

@@ -14,10 +14,8 @@ import { summarizeEntries } from '@/services/aiApi'
 import { slugOfStream, linkEntry, unlinkEntry } from '@/services/streams'
 import { $streams, $streamLinks, $feedFilter, $activeDrain, $searchJump } from '@/stores/streams'
 import {
-  authorKeyOf,
   isEntryVisible,
   isFilterActive,
-  describeAuthorKey,
   singleSelectedStream,
   UNSORTED,
   EMPTY_FILTER,
@@ -43,7 +41,9 @@ import { AddCommentPopover } from './AddCommentPopover'
 import { EditorToolbar } from './EditorToolbar'
 import { useDrainStreams } from './useDrainStreams'
 import { createStreamSuggestion } from './StreamSuggestion'
-import { safeName, safeColor, handleChannelShortcut } from './utils'
+import { Embed } from './EmbedExtension'
+import { safeName, safeColor, handleChannelShortcut, collectDays } from './utils'
+import { $comments, $summarizeDayOf } from '@/stores/feed'
 import { X } from 'lucide-react'
 
 const PAGE_SIZE = 50
@@ -186,6 +186,7 @@ export default function Feed({ dbName }: { dbName: string }) {
       createMentionExtension(dbName),
       createStreamSuggestion(dbName),
       ReferenceExtension,
+      Embed,
     ],
     content: '',
     onUpdate: () => scheduleSave(),
@@ -542,6 +543,18 @@ export default function Feed({ dbName }: { dbName: string }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [])
 
+  // Entry menus read comments from a store (the comments column is
+  // desktop-only) and ask for "summarize this day" through one.
+  useEffect(() => $comments.set(comments), [comments])
+  const summarizeRequest = useStore($summarizeDayOf)
+  useEffect(() => {
+    if (!summarizeRequest || !editor) return
+    $summarizeDayOf.set(null)
+    const day = collectDays(editor.state.doc, hiddenIdsRef.current).find((d) => d.entryIds.includes(summarizeRequest))
+    if (day) handleSummarize(day.key, day.entryIds)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summarizeRequest, editor])
+
   // Search: highlight the query's words (while stepping through picked
   // results, or while "only matches" filters the feed) and bring the
   // current result into view — paging older entries in if it isn't loaded
@@ -797,7 +810,6 @@ export default function Feed({ dbName }: { dbName: string }) {
             Number(node.attrs.createdAt) >= filterSetAtRef.current)
         const visible = isEntryVisible(
           {
-            authorKey: authorKeyOf(node.attrs),
             pinned,
             matches: searching ? matchesEntry(searchableOf(node, links, bySlug), query) : undefined,
           },
@@ -929,7 +941,7 @@ export default function Feed({ dbName }: { dbName: string }) {
   return (
     <div className="flex h-full min-h-0 flex-col">
       {saveState !== 'idle' && (
-        <div className="absolute top-4 right-32 z-50 rounded-full border bg-background/80 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm">
+        <div className="absolute top-4 right-32 z-30 rounded-full border bg-background/80 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm">
           {saveState === 'saving' && 'Saving…'}
           {saveState === 'saved' && 'Saved'}
           {saveState === 'error' && <span className="text-destructive">Couldn't save</span>}
@@ -960,7 +972,9 @@ export default function Feed({ dbName }: { dbName: string }) {
               onSummarize={handleSummarize}
             />
           )}
-        <div ref={scrollRef} data-feed-scroller className="feed-scroll h-full min-w-0 flex-1 overflow-y-auto pt-24 pr-2 pb-16 lg:pt-16">
+        {/* pl-3: the AI-summary thread bar sits 10px left of each card
+            (EntryBlockView), and a scroll box clips anything outside it. */}
+        <div ref={scrollRef} data-feed-scroller className="feed-scroll h-full min-w-0 flex-1 overflow-y-auto pt-24 pr-2 pb-16 pl-3 lg:pt-16">
           <div className="flex gap-4">
             <div ref={editorColumnRef} className="min-w-0 flex-1">
               {summarizeError && (
@@ -1039,7 +1053,6 @@ function ChannelHeader({ count, loadingMore }: { count: number; loadingMore: boo
   const selected = streams.filter((s) => filter.streams.has(slugOfStream(s)))
   const single = selected.length === 1 && filter.streams.size === 1 ? selected[0] : null
   const extras: string[] = []
-  if (filter.authors.size) extras.push(`by ${[...filter.authors].map(describeAuthorKey).join(', ')}`)
   if (filter.onlyMatches && filter.query.trim()) extras.push(`matching "${filter.query.trim()}"`)
 
   return (
