@@ -342,3 +342,18 @@
 .tiptap p[data-entry-id].search-active {
     box-shadow: 0 0 0 2px color-mix(in oklch, oklch(0.85 0.17 85) 70%, transparent);
 }
+
+/* Low-end devices (Layout.astro sets html.low-end): no backdrop blur
+   anywhere — it's a full-screen GPU filter — and darker overlays to make up
+   for the missing frost, so the page behind still reads as dimmed. */
+html.low-end *,
+html.low-end *::before,
+html.low-end *::after {
+    -webkit-backdrop-filter: none !important;
+    backdrop-filter: none !important;
+}
+
+html.low-end [data-slot='dialog-overlay'],
+html.low-end [data-backdrop] {
+    background-color: oklch(0 0 0 / 0.5) !important;
+}

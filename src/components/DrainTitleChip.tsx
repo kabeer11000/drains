@@ -37,7 +37,7 @@ export default function DrainTitleChip({ dbName }: { dbName: string }) {
       <button
         type="button"
         onClick={() => setEditOpen(true)}
-        className={`absolute top-4 left-20 z-50 flex items-center gap-2 rounded-full border bg-background/80 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm transition-colors hover:bg-background hover:text-foreground lg:left-6 ${FOCUS_RING}`}
+        className={`absolute top-4 left-20 z-30 flex items-center gap-2 rounded-full border bg-background/80 px-3 py-1.5 text-xs text-muted-foreground backdrop-blur-sm transition-colors hover:bg-background hover:text-foreground lg:left-2 ${FOCUS_RING}`}
       >
         {drain.visibility === 'shared' && <AvatarGroup emails={members} />}
         <span className="max-w-[110px] truncate font-medium sm:max-w-[160px] text-foreground">{drain.title || 'Untitled'}</span>

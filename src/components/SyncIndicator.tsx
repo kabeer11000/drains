@@ -57,7 +57,7 @@ export default function SyncIndicator({ dbName }: { dbName: string }) {
 			<PopoverTrigger
 				render={
 					<button
-						className={`absolute top-4 right-6 z-50 flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs backdrop-blur-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 ${
+						className={`absolute top-4 right-6 z-30 lg:right-2 flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs backdrop-blur-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 ${
 							bad
 								? "border-red-500/40 bg-red-500/10 text-red-600 hover:bg-red-500/15 dark:text-red-400"
 								: "bg-background/80 text-muted-foreground hover:bg-background"

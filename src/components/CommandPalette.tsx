@@ -7,8 +7,8 @@ import { $drains } from '@/helpers/drains'
 import { getDrainDb } from '@/services/db'
 import { stripHtml } from '@/utils/stripHtml'
 import { $activeDrain, $feedFilter, $searchJump, $streams } from '@/stores/streams'
-import { slugOfStream } from '@/services/streams'
-import { authorKeyOf, liveLinksOf, singleSelectedStream } from '@/components/Feed/feedFilter'
+import { slugOfStream, buildStreamIndex } from '@/services/streams'
+import { authorKeyOf, singleSelectedStream } from '@/components/Feed/feedFilter'
 import { parseQuery, isEmptyQuery, matchesEntry, matchRanges, snippet, type SnippetPart } from '@/components/Feed/search'
 import { entryDayTs, dayLabel, relativeTime } from '@/components/Feed/utils'
 import { Command, CommandDialog, CommandList, CommandEmpty, CommandGroup, CommandItem } from '@/components/ui/command'
@@ -47,7 +47,7 @@ export function SearchTrigger() {
       title={`${label} (${isMac ? '⌘' : 'Ctrl+'}K)`}
       aria-label={label}
       onClick={() => $commandPaletteOpen.set(true)}
-      className="absolute top-4 left-11 z-40 flex size-7 items-center justify-center gap-2 rounded-full border bg-background/80 text-xs text-muted-foreground shadow-sm backdrop-blur-sm outline-none transition-colors hover:bg-background hover:text-foreground lg:bg-muted lg:backdrop-blur-none lg:hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 lg:left-1/2 lg:h-8 lg:w-80 lg:-translate-x-1/2 lg:justify-start lg:px-3"
+      className="absolute top-4 left-11 z-30 flex size-7 items-center justify-center gap-2 rounded-full border bg-background/80 text-xs text-muted-foreground shadow-sm backdrop-blur-sm outline-none transition-colors hover:bg-background hover:text-foreground lg:bg-muted lg:backdrop-blur-none lg:hover:bg-accent focus-visible:ring-3 focus-visible:ring-ring/50 lg:left-1/2 lg:h-8 lg:w-80 lg:-translate-x-1/2 lg:justify-start lg:px-3"
     >
       <Search className="size-3.5 shrink-0" />
       <span className="hidden min-w-0 flex-1 truncate text-left lg:inline">{label}</span>
@@ -142,17 +142,7 @@ async function indexDrain(dbName: string, title: string): Promise<DrainIndex> {
     .allDocs({ include_docs: true })
     .catch(() => ({ rows: [] as any[] }))
   const docs = res.rows.map((r: any) => r.doc).filter(Boolean)
-  const streams: StreamInfo[] = docs
-    .filter((d: any) => d.type === 'stream')
-    .map((d: any) => ({ slug: d._id.slice('stream:'.length), name: d.name, color: d.color }))
-  const bySlug = new Map(streams.map((s) => [s.slug, s]))
-  const links = new Map<string, Set<string>>()
-  for (const d of docs) {
-    if (d.type !== 'streamlink') continue
-    const set = links.get(d.entryId) ?? new Set<string>()
-    set.add(d.streamId)
-    links.set(d.entryId, set)
-  }
+  const { streams, byEntry } = buildStreamIndex(docs)
   const entries: IndexedEntry[] = docs
     .filter((d: any) => d._id.startsWith('entry:') && d.content)
     .map((d: any) => {
@@ -163,7 +153,7 @@ async function indexDrain(dbName: string, title: string): Promise<DrainIndex> {
         createdAt: Number(d.createdAt),
         updatedAt: Number(d.updatedAt ?? d.createdAt),
         done: isDoneHtml(d.content),
-        streams: liveLinksOf(links.get(entryId), new Set(bySlug.keys())).map((slug) => bySlug.get(slug)!),
+        streams: byEntry.get(entryId) ?? [],
         authorName: d.createdByName ?? '',
         authorKey: authorKeyOf(d),
         source: d.source,

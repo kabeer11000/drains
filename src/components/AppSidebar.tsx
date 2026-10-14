@@ -274,7 +274,8 @@ export default function AppSidebar() {
           almost no room for the feed on a phone-width screen. */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 z-50 bg-black/40 lg:hidden"
+          data-backdrop
+          className="fixed inset-0 z-50 bg-black/40 supports-backdrop-filter:backdrop-blur-xs lg:hidden"
           onClick={() => $sidebarOpen.set(false)}
         />
       )}

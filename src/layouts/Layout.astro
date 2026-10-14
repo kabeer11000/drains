@@ -45,12 +45,25 @@ const canonicalUrl = new URL(Astro.url.pathname, Astro.site ?? "https://drains.d
 					var dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches);
 					document.documentElement.classList.toggle('dark', dark);
 				}
+				// Backdrop blur is expensive on weak GPUs. On low-end devices (or
+				// when the OS asks for less transparency) global.css turns every
+				// backdrop-filter off and darkens overlays instead.
+				var n = navigator;
+				var lowEnd =
+					(n.hardwareConcurrency && n.hardwareConcurrency <= 4) ||
+					(n.deviceMemory && n.deviceMemory <= 4) ||
+					matchMedia('(prefers-reduced-transparency: reduce)').matches;
+				function applyPerf() {
+					document.documentElement.classList.toggle('low-end', !!lowEnd);
+				}
 				applyTheme();
+				applyPerf();
 				// View Transitions swaps <html>'s attributes to match each new
-				// page's server-rendered markup (which never has class="dark" —
-				// it's applied client-side), wiping it on every navigation unless
-				// this re-runs after each swap.
+				// page's server-rendered markup (which never has these classes —
+				// they're applied client-side), wiping them on every navigation
+				// unless this re-runs after each swap.
 				document.addEventListener('astro:after-swap', applyTheme);
+				document.addEventListener('astro:after-swap', applyPerf);
 			})();
 		</script>
 
