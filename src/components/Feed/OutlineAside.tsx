@@ -3,9 +3,7 @@ import type { Editor } from '@tiptap/react'
 import { useStore } from '@nanostores/react'
 import { Sparkles, Loader2, Plus, MoreHorizontal, Pencil, Trash2, Inbox, Layers } from 'lucide-react'
 import { getDrainDb } from '@/services/db'
-import { $identity } from '@/services/identity'
 import {
-  createStream,
   renameStream,
   recolorStream,
   deleteStream,
@@ -16,6 +14,7 @@ import {
 } from '@/services/streams'
 import { $streams, $streamLinks, $feedFilter } from '@/stores/streams'
 import { UNSORTED, countByStream, selectStream } from './feedFilter'
+import { StreamCreator } from './StreamCreator'
 import { collectDays, goToAllEntries, type DayGroup } from './utils'
 import { onlyEntryTextChanged } from './docDiff'
 import {
@@ -102,14 +101,12 @@ export const OutlineAside = memo(function OutlineAside({
   onSummarize: (key: string, entryIds: string[]) => void
 }) {
   const db = getDrainDb(dbName)
-  const identity = useStore($identity)
   const streams = useStore($streams)
   const streamLinks = useStore($streamLinks)
   const filter = useStore($feedFilter)
 
   const [days, setDays] = useState<DayGroup[]>([])
   const [creating, setCreating] = useState(false)
-  const [newName, setNewName] = useState('')
   const [renaming, setRenaming] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState('')
   const [deleted, setDeleted] = useState<{ doc: Omit<StreamDoc, '_rev'>; timer: ReturnType<typeof setTimeout> } | null>(
@@ -138,15 +135,6 @@ export const OutlineAside = memo(function OutlineAside({
   const choose = (slug: string) => (e: React.MouseEvent) =>
     $feedFilter.set(selectStream($feedFilter.get(), slug, e.metaKey || e.ctrlKey))
 
-  const submitCreate = async () => {
-    const name = newName.trim()
-    setCreating(false)
-    setNewName('')
-    if (!name || !identity) return
-    const stream = await createStream(db, name, identity, STREAM_COLORS[streams.length % STREAM_COLORS.length])
-    // A new stream opens straight away, so the next entry typed lands in it.
-    $feedFilter.set({ ...$feedFilter.get(), streams: new Set([slugOfStream(stream)]) })
-  }
 
   const submitRename = async (slug: string) => {
     const value = renameValue.trim()
@@ -298,21 +286,7 @@ export const OutlineAside = memo(function OutlineAside({
           })}
 
           {creating ? (
-            <input
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onBlur={submitCreate}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') submitCreate()
-                if (e.key === 'Escape') {
-                  setCreating(false)
-                  setNewName('')
-                }
-              }}
-              placeholder="Stream name"
-              className="mx-1 rounded-md border border-input bg-transparent px-2 py-1 text-[13px] outline-none focus-visible:border-ring"
-            />
+            <StreamCreator variant="row" onClose={() => setCreating(false)} />
           ) : (
             streams.length === 0 && (
               <button

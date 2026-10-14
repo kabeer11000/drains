@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
 import { useStore } from '@nanostores/react'
 import { Inbox, Plus } from 'lucide-react'
-import { $streams, $streamLinks, $feedFilter, $activeDrain, $searchJump } from '@/stores/streams'
-import { $identity } from '@/services/identity'
-import { getDrainDb } from '@/services/db'
-import { createStream, slugOfStream, STREAM_COLORS } from '@/services/streams'
+import { $streams, $streamLinks, $feedFilter, $searchJump } from '@/stores/streams'
+import { slugOfStream } from '@/services/streams'
 import { UNSORTED, countByStream, selectStream } from './feedFilter'
 import { goToAllEntries } from './utils'
+import { StreamCreator } from './StreamCreator'
 
 function Chip({
   active,
@@ -48,10 +47,7 @@ export function StreamBar() {
   const streams = useStore($streams)
   const links = useStore($streamLinks)
   const filter = useStore($feedFilter)
-  const drain = useStore($activeDrain)
-  const identity = useStore($identity)
   const [creating, setCreating] = useState(false)
-  const [name, setName] = useState('')
   const rowRef = useRef<HTMLDivElement>(null)
   const [hidden, setHidden] = useState(false)
 
@@ -86,15 +82,7 @@ export function StreamBar() {
     $feedFilter.set(selectStream($feedFilter.get(), slug, false))
   }
 
-  const submit = async () => {
-    const value = name.trim()
-    setCreating(false)
-    setName('')
-    if (!value || !drain || !identity) return
-    const color = STREAM_COLORS[streams.length % STREAM_COLORS.length]
-    const stream = await createStream(getDrainDb(drain.dbName), value, identity, color)
-    $feedFilter.set({ ...$feedFilter.get(), streams: new Set([slugOfStream(stream)]) })
-  }
+
 
   return (
     <div
@@ -126,21 +114,7 @@ export function StreamBar() {
           </Chip>
         )}
         {creating ? (
-          <input
-            autoFocus
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            onBlur={submit}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') submit()
-              if (e.key === 'Escape') {
-                setCreating(false)
-                setName('')
-              }
-            }}
-            placeholder="Stream name"
-            className="h-8 w-36 shrink-0 rounded-full border border-input bg-transparent px-3 text-[13px] outline-none focus-visible:border-ring"
-          />
+          <StreamCreator variant="chip" onClose={() => setCreating(false)} />
         ) : (
           <button
             type="button"
