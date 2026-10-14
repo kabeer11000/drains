@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#211a38"/>
+      <stop offset="1" stop-color="#0b0b10"/>
+    </linearGradient>
+    <linearGradient id="flow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c4b5fd"/>
+      <stop offset="1" stop-color="#8b5cf6"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="15" fill="url(#bg)"/>
+  <!-- log lines, narrowing as they flow down -->
+  <rect x="12" y="12" width="40" height="6.5" rx="3.25" fill="#fff" opacity=".95"/>
+  <rect x="17" y="23.5" width="30" height="6.5" rx="3.25" fill="#fff" opacity=".72"/>
+  <rect x="22.5" y="35" width="19" height="6.5" rx="3.25" fill="#fff" opacity=".5"/>
+  <!-- the drain -->
+  <circle cx="32" cy="50" r="5.6" fill="none" stroke="url(#flow)" stroke-width="3.2"/>
+  <circle cx="32" cy="50" r="1.7" fill="#c4b5fd"/>
+</svg>
