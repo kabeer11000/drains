@@ -8,3 +8,7 @@ export const $comments = atom<CommentDoc[]>([])
 // Set by an entry's menu ("Summarize this day"); Feed works out which day
 // that entry belongs to and runs the same summarize as the sidebar.
 export const $summarizeDayOf = atom<string | null>(null)
+
+// Set once the date scrubber is first used: Feed then pages the rest of the
+// drain in, so the scrollbar spans every entry and its dates are exact.
+export const $loadWholeDrain = atom(false)

@@ -43,7 +43,8 @@ import { useDrainStreams } from './useDrainStreams'
 import { createStreamSuggestion } from './StreamSuggestion'
 import { Embed } from './EmbedExtension'
 import { safeName, safeColor, handleChannelShortcut, collectDays } from './utils'
-import { $comments, $summarizeDayOf } from '@/stores/feed'
+import { $comments, $summarizeDayOf, $loadWholeDrain } from '@/stores/feed'
+import { DateScrubber } from './DateScrubber'
 import { X } from 'lucide-react'
 
 const PAGE_SIZE = 50
@@ -98,6 +99,8 @@ export default function Feed({ dbName }: { dbName: string }) {
   const fullId = (rid: string) => `${entryPrefix}${rid}`
 
   useDrainStreams(dbName)
+  // Whole-drain loading is per drain: the scrubber asks again when used.
+  useEffect(() => $loadWholeDrain.set(false), [dbName])
   const streams = useStore($streams)
   const streamLinks = useStore($streamLinks)
   const feedFilter = useStore($feedFilter)
@@ -510,7 +513,8 @@ export default function Feed({ dbName }: { dbName: string }) {
   // filter stays active — fine at this app's real per-drain entry counts;
   // a drain with tens of thousands of entries would need a server-side
   // count/search instead of "load everything" client-side.
-  const needsWholeDrain = isFilterActive(feedFilter) || feedFilter.query.trim().length > 0
+  const wantWholeDrain = useStore($loadWholeDrain)
+  const needsWholeDrain = isFilterActive(feedFilter) || feedFilter.query.trim().length > 0 || wantWholeDrain
   useEffect(() => {
     if (!initialLoaded || !needsWholeDrain) return
     let cancelled = false
@@ -957,6 +961,7 @@ export default function Feed({ dbName }: { dbName: string }) {
           style={{ background: 'linear-gradient(to top, var(--background), transparent)' }}
         />
         <StreamBar />
+        {editor && initialLoaded && <DateScrubber editor={editor} />}
         {editor && <EditorToolbar editor={editor} anchorRef={editorColumnRef} />}
         {/* The channel sidebar is its own column OUTSIDE the scroller. Inside
             it (as a sticky child) its resting spot depended on the feed's
@@ -972,9 +977,11 @@ export default function Feed({ dbName }: { dbName: string }) {
               onSummarize={handleSummarize}
             />
           )}
-        {/* pl-3: the AI-summary thread bar sits 10px left of each card
-            (EntryBlockView), and a scroll box clips anything outside it. */}
-        <div ref={scrollRef} data-feed-scroller className="feed-scroll h-full min-w-0 flex-1 overflow-y-auto pt-24 pr-2 pb-16 pl-3 lg:pt-16">
+        {/* lg:pl-3: the AI-summary thread bar sits 10px left of each card
+            (EntryBlockView), and a scroll box clips anything outside it. On
+            phones only the cards in a summary thread indent for it instead,
+            so every other entry gets the full width. */}
+        <div ref={scrollRef} data-feed-scroller className="feed-scroll h-full min-w-0 flex-1 overflow-y-auto pt-24 pr-2 pb-16 lg:pl-3 lg:pt-16 [@media(pointer:fine)]:pr-9">
           <div className="flex gap-4">
             <div ref={editorColumnRef} className="min-w-0 flex-1">
               {summarizeError && (

@@ -72,11 +72,16 @@ export function EntryBlockView({ node, deleteNode }: NodeViewProps) {
     <NodeViewWrapper
       as="p"
       data-entry-id={entryId}
+      // Lets the date scrubber skip the empty composer (it already has a
+      // fresh id, so it would read as "Today").
+      data-composer={isComposer ? '' : undefined}
       // Lets a `#entry-<id>` link to the page already open (Recent Activity,
       // search) scroll here natively: Astro's router hands same-page hash
       // links to the browser, which only matches element ids.
       id={entryId ? `entry-${entryId}` : undefined}
-      className={`group relative ${isComposer ? 'border border-dashed border-border' : ''}`}
+      className={`group relative ${isComposer ? 'border border-dashed border-border' : ''} ${
+        isSummary || isClaimed ? 'max-lg:ml-3' : ''
+      }`}
       style={{
         // The placeholder below is position: absolute (so it never
         // intercepts clicks meant for the empty editable content beneath

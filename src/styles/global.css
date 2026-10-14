@@ -207,6 +207,24 @@
    on top of text. */
 .tiptap p[data-entry-id] {
     padding-right: 40px;
+    /* Jumps (date scrubber, search) land below the floating header. */
+    scroll-margin-top: 104px;
+}
+
+@media (min-width: 1024px) {
+    .tiptap p[data-entry-id] {
+        scroll-margin-top: 80px;
+    }
+}
+
+/* The date scrubber (Feed/DateScrubber.tsx) is the feed's scrollbar, so
+   the native one is hidden. Qualified with .feed-scroll so it beats that
+   class's thin-scrollbar rule, which comes later in this file. */
+.feed-scroll[data-feed-scroller] {
+    scrollbar-width: none;
+}
+.feed-scroll[data-feed-scroller]::-webkit-scrollbar {
+    display: none;
 }
 
 .tiptap p[data-entry-id]:hover {
